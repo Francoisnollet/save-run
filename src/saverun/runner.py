@@ -23,16 +23,13 @@ MAX_ATTEMPTS = 4          # first try + 3 retries
 BASE_DELAY = 2.0          # seconds, doubled after each failed attempt
 MAX_FAILED_SHARE = 0.10   # above this share of failed calls, a variant is not fairly comparable
 
-_NETWORK_ERRORS = {"APIConnectionError", "APITimeoutError", "ConnectError", "ReadTimeout",
-                   "ConnectionError", "TimeoutError"}
-
 
 class TransientError(Exception):
-    """Rate limit (429), server error (5xx) or network failure: worth retrying."""
+    """Rate limit (429) or server error (5xx): the only failures worth retrying."""
 
 
 class PermanentError(Exception):
-    """Any other failure: retrying would not help."""
+    """Any other failure (400, 401, 404, network, missing usage...): fails at once, no retry."""
 
 
 class MissingKeyError(RuntimeError):
@@ -48,6 +45,7 @@ class Completion:
     text: str
     tokens_in: int
     tokens_out: int
+    truncated: bool = False  # the answer hit max_tokens
 
 
 class ModelClient(Protocol):
@@ -56,14 +54,27 @@ class ModelClient(Protocol):
 
 # --- Adapters ---------------------------------------------------------------------
 
+def _describe(status: int | None, name: str) -> str:
+    if status == 429:
+        return "limite de débit atteinte (HTTP 429)"
+    if status and status >= 500:
+        return f"erreur du serveur du fournisseur (HTTP {status})"
+    if status == 400:
+        return "requête refusée (HTTP 400) : vérifiez l'identifiant du modèle, max_tokens et temperature"
+    if status in (401, 403):
+        return f"clé API refusée (HTTP {status}) : vérifiez la variable d'environnement de la clé"
+    if status == 404:
+        return "modèle ou URL introuvable (HTTP 404) : vérifiez l'identifiant du modèle et base_url"
+    if status:
+        return f"erreur de l'API (HTTP {status})"
+    return f"erreur réseau ou inattendue ({name})"
+
+
 def classify_error(exc: Exception) -> Exception:
-    """Map an SDK exception to Transient/PermanentError carrying only class name and HTTP status."""
+    """Map an SDK exception to Transient (429, 5xx) or PermanentError. The SDK's own text is never kept."""
     status = getattr(exc, "status_code", None)
-    name = type(exc).__name__
-    label = f"{name} (HTTP {status})" if status else name
-    transient = (status == 429 or (status or 0) >= 500
-                 or (status is None and name in _NETWORK_ERRORS))
-    return (TransientError if transient else PermanentError)(label)
+    transient = status == 429 or (status or 0) >= 500
+    return (TransientError if transient else PermanentError)(_describe(status, type(exc).__name__))
 
 
 def _read_key(env_name: str) -> str:
@@ -89,7 +100,8 @@ class AnthropicClient:
         except Exception as e:
             raise classify_error(e) from None
         text = "".join(b.text for b in r.content if getattr(b, "type", "text") == "text")
-        return Completion(text, r.usage.input_tokens, r.usage.output_tokens)
+        return Completion(text, r.usage.input_tokens, r.usage.output_tokens,
+                          truncated=getattr(r, "stop_reason", None) == "max_tokens")
 
 
 class OpenAICompatibleClient:
@@ -111,8 +123,10 @@ class OpenAICompatibleClient:
         usage = getattr(r, "usage", None)
         if usage is None or usage.prompt_tokens is None or usage.completion_tokens is None:
             # Costs rest on tokens reported by the API: never estimate them for a real call.
-            raise PermanentError("Réponse sans comptage de tokens (usage absent)")
-        return Completion(r.choices[0].message.content or "", usage.prompt_tokens, usage.completion_tokens)
+            raise PermanentError("l'API ne renvoie pas le nombre de tokens, SAVE Run ne peut pas chiffrer le coût")
+        choice = r.choices[0]
+        return Completion(choice.message.content or "", usage.prompt_tokens, usage.completion_tokens,
+                          truncated=getattr(choice, "finish_reason", None) == "length")
 
 
 # --- Rate limiting and retries ----------------------------------------------------
@@ -157,7 +171,6 @@ def complete_with_retry(client: ModelClient, limiter: RateLimiter | None, system
 class ModelRuntime:
     client: ModelClient
     limiter: RateLimiter | None
-    temperature: float | None  # None: not sent, the provider's default applies
 
 
 def build_runtimes(config: Config, *, dry_run: bool, expectations: dict[str, str] | None = None,
@@ -166,7 +179,7 @@ def build_runtimes(config: Config, *, dry_run: bool, expectations: dict[str, str
     if dry_run:
         from .fake import FakeClient
         return {m.id: ModelRuntime(FakeClient(m.id, expectations or {}, config.scoring,
-                                              config.seed if seed is None else seed), None, m.temperature)
+                                              config.seed if seed is None else seed), None)
                 for m in config.models}
     absent = [m.api_key_env for m in config.models if not os.environ.get(m.api_key_env)]
     if absent:
@@ -176,7 +189,7 @@ def build_runtimes(config: Config, *, dry_run: bool, expectations: dict[str, str
     for m in config.models:
         client = (AnthropicClient(m.id, m.api_key_env) if m.provider == "anthropic"
                   else OpenAICompatibleClient(m.id, m.base_url, m.api_key_env))
-        runtimes[m.id] = ModelRuntime(client, RateLimiter(m.rpm), m.temperature)
+        runtimes[m.id] = ModelRuntime(client, RateLimiter(m.rpm))
     return runtimes
 
 
@@ -195,11 +208,14 @@ class Job:
     input: str
     run: int
     phase: str  # "selection" or "validation"
+    temperature: float | None = None  # None: not sent, the provider's default applies
+    max_tokens: int = 300
 
     @property
     def key(self) -> tuple:
-        """Identity of a call: same model, prompt, case input and run give a reusable result."""
-        return (self.model, _sha(self.system), self.case, _sha(self.input), self.run)
+        """Identity of a call: a stored result is reused only if every one of these is unchanged."""
+        return (self.model, _sha(self.system), self.case, _sha(self.input), self.run,
+                self.temperature, self.max_tokens)
 
 
 @dataclass(frozen=True)
@@ -211,10 +227,13 @@ class CallResult:
     input_hash: str
     run: int
     phase: str
+    temperature: float | None
+    max_tokens: int
     status: str                  # "ok" or "failed"
     output: str | None = None
     tokens_in: int | None = None
     tokens_out: int | None = None
+    truncated: bool = False      # scored as usual, tallied apart (see truncation_stats)
     error: str | None = None
 
     @property
@@ -223,7 +242,8 @@ class CallResult:
 
     @property
     def key(self) -> tuple:
-        return (self.model, self.prompt_hash, self.case, self.input_hash, self.run)
+        return (self.model, self.prompt_hash, self.case, self.input_hash, self.run,
+                self.temperature, self.max_tokens)
 
 
 class RunStore:
@@ -254,7 +274,7 @@ class RunStore:
                 f.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
 
 
-def execute(jobs: list[Job], runtimes: dict[str, ModelRuntime], store: RunStore, *, max_tokens: int,
+def execute(jobs: list[Job], runtimes: dict[str, ModelRuntime], store: RunStore, *,
             progress: Callable[[CallResult], None] | None = None,
             sleep: Callable[[float], None] = time.sleep) -> list[CallResult]:
     """Run every job; models run in parallel, each paced by its own rate limiter.
@@ -271,15 +291,17 @@ def execute(jobs: list[Job], runtimes: dict[str, ModelRuntime], store: RunStore,
 
     def one(job: Job) -> CallResult:
         base = dict(model=job.model, variant=job.variant, prompt_hash=_sha(job.system), case=job.case,
-                    input_hash=_sha(job.input), run=job.run, phase=job.phase)
+                    input_hash=_sha(job.input), run=job.run, phase=job.phase,
+                    temperature=job.temperature, max_tokens=job.max_tokens)
         cached = reuse.get(job.key)
         if cached:
             return replace(cached, variant=job.variant, phase=job.phase)
         rt = runtimes[job.model]
         try:
-            c = complete_with_retry(rt.client, rt.limiter, job.system, job.input, max_tokens=max_tokens,
-                                    temperature=rt.temperature, sleep=sleep)
-            res = CallResult(**base, status="ok", output=c.text, tokens_in=c.tokens_in, tokens_out=c.tokens_out)
+            c = complete_with_retry(rt.client, rt.limiter, job.system, job.input, max_tokens=job.max_tokens,
+                                    temperature=job.temperature, sleep=sleep)
+            res = CallResult(**base, status="ok", output=c.text, tokens_in=c.tokens_in,
+                             tokens_out=c.tokens_out, truncated=c.truncated)
         except (TransientError, PermanentError) as e:
             suffix = f", après {MAX_ATTEMPTS} tentatives" if isinstance(e, TransientError) else ""
             res = CallResult(**base, status="failed", error=f"{e}{suffix}")
@@ -302,29 +324,39 @@ def execute(jobs: list[Job], runtimes: dict[str, ModelRuntime], store: RunStore,
 # --- Failures ---------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class FailureStat:
-    failed: int
+class Tally:
+    count: int
     total: int
 
     @property
     def share(self) -> float:
-        return self.failed / self.total if self.total else 0.0
+        return self.count / self.total if self.total else 0.0
 
 
-def failure_stats(results: list[CallResult]) -> dict[tuple[str, str], FailureStat]:
-    """Failed vs total calls per (model, variant)."""
+def _tally(results: list[CallResult], pick, counts) -> dict[tuple[str, str], Tally]:
     acc: dict[tuple[str, str], list[int]] = {}
     for r in results:
-        a = acc.setdefault((r.model, r.variant), [0, 0])
-        a[0] += not r.ok
-        a[1] += 1
-    return {k: FailureStat(*v) for k, v in acc.items()}
+        if pick(r):
+            a = acc.setdefault((r.model, r.variant), [0, 0])
+            a[0] += counts(r)
+            a[1] += 1
+    return {k: Tally(*v) for k, v in acc.items()}
 
 
-def unfair_variants(stats: dict[tuple[str, str], FailureStat],
+def failure_stats(results: list[CallResult]) -> dict[tuple[str, str], Tally]:
+    """Failed calls out of all calls, per (model, variant)."""
+    return _tally(results, lambda r: True, lambda r: not r.ok)
+
+
+def truncation_stats(results: list[CallResult]) -> dict[tuple[str, str], Tally]:
+    """Truncated answers out of the completed calls, per (model, variant); the report advises a higher max_tokens."""
+    return _tally(results, lambda r: r.ok, lambda r: r.truncated)
+
+
+def unfair_variants(stats: dict[tuple[str, str], Tally],
                     max_share: float = MAX_FAILED_SHARE) -> list[tuple[str, str]]:
     """(model, variant) pairs with too many failed calls to be compared fairly with the others."""
-    return [k for k, s in stats.items() if s.share > max_share]
+    return [k for k, t in stats.items() if t.share > max_share]
 
 
 # --- Pre-launch check -------------------------------------------------------------
@@ -340,7 +372,7 @@ class Preflight:
     warnings: list[str] = field(default_factory=list)
 
 
-def preflight(jobs: list[Job], prices: PriceTable, max_tokens: int, max_calls: int | None,
+def preflight(jobs: list[Job], prices: PriceTable, max_calls: int | None,
               store: RunStore | None = None) -> Preflight:
     """Count the calls to make and bound their cost. Blocks on a missing price or an exceeded max_calls."""
     models = sorted({j.model for j in jobs})
@@ -354,6 +386,12 @@ def preflight(jobs: list[Job], prices: PriceTable, max_tokens: int, max_calls: i
     cost = 0.0
     for j in pending:
         by_model[j.model] = by_model.get(j.model, 0) + 1
-        cost += call_cost(estimate_tokens(j.system + j.input), max_tokens, prices.models[j.model])
+        cost += call_cost(estimate_tokens(j.system + j.input), j.max_tokens, prices.models[j.model])
     return Preflight(len(jobs), len(jobs) - len(pending), len(pending), by_model, cost, prices.currency,
                      prices.warnings(models))
+
+
+def build_jobs(variants, config: Config, cases, phase: str) -> list[Job]:
+    """One job per (model, variant, case, run). `variants` only need `.id` and `.system`."""
+    return [Job(m.id, v.id, v.system, c.id, c.input, run, phase, m.temperature, config.max_tokens)
+            for m in config.models for v in variants for c in cases for run in range(config.runs_per_case)]

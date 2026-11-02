@@ -48,7 +48,10 @@ class FakeClient:
         else:
             answer = '{"erreur": true}' if self._scoring == "json_fields" else "indéterminé"
         text = f"Je réfléchis... {FINAL_MARKER} {answer}" if REASONING_CUE in system else answer
-        return Completion(text, estimate_tokens(system + user), estimate_tokens(text))
+        truncated = estimate_tokens(text) > max_tokens
+        if truncated:
+            text = text[: max_tokens * 4]
+        return Completion(text, estimate_tokens(system + user), estimate_tokens(text), truncated)
 
     def _shift_key(self) -> int:
         return zlib.crc32(self.model_id.encode())

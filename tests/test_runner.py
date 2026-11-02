@@ -9,7 +9,7 @@ from saverun.fake import FakeClient
 from saverun.runner import (AnthropicClient, CallResult, Completion, Job, MaxCallsError, MissingKeyError,
                             ModelRuntime, OpenAICompatibleClient, PermanentError, RateLimiter, RunStore,
                             TransientError, build_runtimes, classify_error, complete_with_retry, execute,
-                            failure_stats, preflight, unfair_variants)
+                            build_jobs, failure_stats, preflight, truncation_stats, unfair_variants)
 from saverun.scoring import case_rates
 
 SECRET = "sk-SECRET-0123456789"
@@ -34,7 +34,7 @@ ConnectionLost.__name__ = "APIConnectionError"
 
 @pytest.mark.parametrize("exc,transient", [
     (SdkError(429), True), (SdkError(503), True), (SdkError(500), True), (SdkError(401), False),
-    (SdkError(400), False), (SdkError(404), False), (ConnectionLost(), True), (ValueError("x"), False),
+    (SdkError(400), False), (SdkError(404), False), (ConnectionLost(), False), (ValueError("x"), False),
 ])
 def test_classify_error(exc, transient):
     out = classify_error(exc)
@@ -84,7 +84,7 @@ def test_adapter_errors_carry_no_sdk_text():
     c = AnthropicClient("m", "K", sdk_client=NS(messages=NS(create=create)))
     with pytest.raises(TransientError) as e:
         c.complete("s", "u", max_tokens=1, temperature=None)
-    assert str(e.value) == "SdkError (HTTP 429)" and e.value.__cause__ is None
+    assert str(e.value) == "limite de débit atteinte (HTTP 429)" and e.value.__cause__ is None
 
 
 # --- rate limiter and retries ------------------------------------------------------
@@ -157,9 +157,9 @@ class Counting:
 
 
 def test_failed_calls_are_marked_and_do_not_stop_the_rest(tmp_path):
-    runtimes = {"bon": ModelRuntime(Counting(), None, None), "mauvais": ModelRuntime(Counting(fail=True), None, None)}
+    runtimes = {"bon": ModelRuntime(Counting(), None), "mauvais": ModelRuntime(Counting(fail=True), None)}
     store = RunStore(tmp_path / "runs")
-    res = execute(jobs_for(["bon", "mauvais"]), runtimes, store, max_tokens=10, sleep=lambda s: None)
+    res = execute(jobs_for(["bon", "mauvais"]), runtimes, store, sleep=lambda s: None)
     assert [r.model for r in res] == [j.model for j in jobs_for(["bon", "mauvais"])]  # job order kept
     assert all(r.ok for r in res if r.model == "bon")
     bad = [r for r in res if r.model == "mauvais"]
@@ -172,7 +172,7 @@ def test_failures_are_excluded_from_the_score_not_counted_wrong():
     expected = {"C001": "a", "C002": "a", "C003": "a"}
 
     def res(case, status, out):
-        return CallResult("m", "V01", "h", case, "i", 0, "selection", status, out)
+        return CallResult("m", "V01", "h", case, "i", 0, "selection", None, 300, status, out)
 
     rates = case_rates([res("C001", "ok", "a"), res("C002", "failed", None), res("C003", "ok", "b")],
                        expected, "exact")
@@ -180,8 +180,8 @@ def test_failures_are_excluded_from_the_score_not_counted_wrong():
 
 
 def test_failure_share_flags_variants_not_comparable():
-    ok = lambda v: CallResult("m", v, "h", "c", "i", 0, "selection", "ok", "x", 1, 1)
-    ko = lambda v: CallResult("m", v, "h", "c", "i", 0, "selection", "failed", error="e")
+    ok = lambda v: CallResult("m", v, "h", "c", "i", 0, "selection", None, 300, "ok", "x", 1, 1)
+    ko = lambda v: CallResult("m", v, "h", "c", "i", 0, "selection", None, 300, "failed", error="e")
     stats = failure_stats([ok("V01")] * 10 + [ok("V02")] * 8 + [ko("V02")] * 2)
     assert stats[("m", "V02")].share == pytest.approx(0.2)
     assert unfair_variants(stats) == [("m", "V02")]
@@ -192,19 +192,19 @@ def test_resume_reuses_ok_calls_and_retries_failed_ones(tmp_path):
     store = RunStore(tmp_path)
     jobs = jobs_for(["m"], n_cases=3, variants=("V01",))
     c = Counting()
-    execute(jobs, {"m": ModelRuntime(c, None, None)}, store, max_tokens=10, sleep=lambda s: None)
+    execute(jobs, {"m": ModelRuntime(c, None)}, store, sleep=lambda s: None)
     assert c.n == 3
     c2 = Counting()
-    res = execute(jobs, {"m": ModelRuntime(c2, None, None)}, store, max_tokens=10, sleep=lambda s: None)
+    res = execute(jobs, {"m": ModelRuntime(c2, None)}, store, sleep=lambda s: None)
     assert c2.n == 0 and all(r.ok for r in res)                      # nothing paid twice
     changed = [Job(j.model, j.variant, j.system + " modifié", j.case, j.input, j.run, j.phase) for j in jobs]
-    execute(changed, {"m": ModelRuntime(c2, None, None)}, store, max_tokens=10, sleep=lambda s: None)
+    execute(changed, {"m": ModelRuntime(c2, None)}, store, sleep=lambda s: None)
     assert c2.n == 3                                                  # a changed prompt is never reused
 
     broken = RunStore(tmp_path / "b")
-    execute(jobs, {"m": ModelRuntime(Counting(fail=True), None, None)}, broken, max_tokens=10, sleep=lambda s: None)
+    execute(jobs, {"m": ModelRuntime(Counting(fail=True), None)}, broken, sleep=lambda s: None)
     c3 = Counting()
-    execute(jobs, {"m": ModelRuntime(c3, None, None)}, broken, max_tokens=10, sleep=lambda s: None)
+    execute(jobs, {"m": ModelRuntime(c3, None)}, broken, sleep=lambda s: None)
     assert c3.n == 3                                                  # failed calls are tried again
 
 
@@ -217,8 +217,7 @@ def test_runs_files_never_contain_a_key(tmp_path, monkeypatch):
     client = AnthropicClient("m", "SR_KEY", sdk_client=NS(messages=NS(create=create)))
     store = RunStore(tmp_path / "runs")
     progress = []
-    execute(jobs_for(["m"], 2, ("V01",)), {"m": ModelRuntime(client, None, None)}, store, max_tokens=10,
-            progress=progress.append, sleep=lambda s: None)
+    execute(jobs_for(["m"], 2, ("V01",)), {"m": ModelRuntime(client, None)}, store, progress=progress.append, sleep=lambda s: None)
     text = " ".join(p.read_text(encoding="utf-8") for p in (tmp_path / "runs").rglob("*") if p.is_file())
     assert text and SECRET not in text and "Bearer" not in text and "x-api-key" not in text
     assert SECRET not in repr(client) and len(progress) == 2
@@ -226,8 +225,7 @@ def test_runs_files_never_contain_a_key(tmp_path, monkeypatch):
 
 def test_truncated_last_line_is_ignored(tmp_path):
     store = RunStore(tmp_path)
-    execute(jobs_for(["m"], 2, ("V01",)), {"m": ModelRuntime(Counting(), None, None)}, store, max_tokens=1,
-            sleep=lambda s: None)
+    execute(jobs_for(["m"], 2, ("V01",)), {"m": ModelRuntime(Counting(), None)}, store, sleep=lambda s: None)
     with store.path.open("a", encoding="utf-8") as f:
         f.write('{"model": "m", "var')
     assert len(store.read_all()) == 2
@@ -241,21 +239,21 @@ PRICES = PriceTable("EUR", {"m": ModelPrice(1.0, 5.0, "2026-01-01", "s")})
 def test_preflight_cost_by_hand_and_reuse(tmp_path):
     jobs = [Job("m", "V01", "x" * 380, f"C{i}", "y" * 20, 0, "selection") for i in range(10)]
     # 400 chars = 100 tokens in; 300 out: (100 x 1 + 300 x 5) / 1e6 = 0.0016 per call
-    pf = preflight(jobs, PRICES, 300, None)
+    pf = preflight(jobs, PRICES, None)
     assert pf.new_calls == 10 and pf.max_cost == pytest.approx(0.016) and pf.currency == "EUR"
     store = RunStore(tmp_path)
-    execute(jobs[:4], {"m": ModelRuntime(Counting(), None, None)}, store, max_tokens=300, sleep=lambda s: None)
-    pf = preflight(jobs, PRICES, 300, None, store)
+    execute(jobs[:4], {"m": ModelRuntime(Counting(), None)}, store, sleep=lambda s: None)
+    pf = preflight(jobs, PRICES, None, store)
     assert (pf.reused, pf.new_calls) == (4, 6) and pf.max_cost == pytest.approx(0.0096)
 
 
 def test_preflight_blocks_on_missing_price_and_max_calls():
     jobs = jobs_for(["m", "inconnu"], 2, ("V01",))
     with pytest.raises(MissingPriceError):
-        preflight(jobs, PRICES, 300, None)
+        preflight(jobs, PRICES, None)
     with pytest.raises(MaxCallsError):
-        preflight(jobs_for(["m"], 6), PRICES, 300, 11)
-    assert preflight(jobs_for(["m"], 6), PRICES, 300, 12).new_calls == 12
+        preflight(jobs_for(["m"], 6), PRICES, 11)
+    assert preflight(jobs_for(["m"], 6), PRICES, 12).new_calls == 12
 
 
 # --- building clients ----------------------------------------------------------------
@@ -279,7 +277,6 @@ def test_dry_run_needs_no_key_and_no_rate_limit(monkeypatch):
     monkeypatch.delenv("SR_KEY_A", raising=False)
     rts = build_runtimes(config(), dry_run=True, expectations={"u": "x"})
     assert set(rts) == {"a", "b"} and all(r.limiter is None for r in rts.values())
-    assert rts["a"].temperature is None and rts["b"].temperature == 0.0
 
 
 # --- fake model ----------------------------------------------------------------------
@@ -303,12 +300,111 @@ def test_fake_cues_raise_the_success_rate():
 
 def test_fake_repeated_calls_differ_for_runs_per_case():
     c = FakeClient("a", {"u": "x"}, seed=0)
-    outs = {c.complete("Classe.", "u", max_tokens=1, temperature=None).text for _ in range(30)}
+    outs = {c.complete("Classe.", "u", max_tokens=100, temperature=None).text for _ in range(30)}
     assert outs == {"x", "indéterminé"}
 
 
 def test_fake_failure_rate_exercises_retries_and_failures(tmp_path):
     c = FakeClient("a", {"u": "x"}, failure_rate=0.9, seed=3)
     res = execute([Job("a", "V01", "s", f"C{i}", "u", 0, "selection") for i in range(20)],
-                  {"a": ModelRuntime(c, None, None)}, RunStore(tmp_path), max_tokens=1, sleep=lambda s: None)
+                  {"a": ModelRuntime(c, None)}, RunStore(tmp_path), sleep=lambda s: None)
     assert any(r.ok for r in res) and any(not r.ok for r in res)  # retries rescue some calls, others end "failed"
+
+
+# --- adjustments after review: truncation, retry policy, reuse key -----------------------
+
+def test_truncation_is_flagged_by_both_adapters():
+    a = AnthropicClient("m", "K", sdk_client=NS(messages=NS(create=lambda **kw: NS(
+        content=[NS(type="text", text="Je réfl")], stop_reason="max_tokens",
+        usage=NS(input_tokens=5, output_tokens=300)))))
+    assert a.complete("s", "u", max_tokens=300, temperature=None).truncated is True
+    done = AnthropicClient("m", "K", sdk_client=NS(messages=NS(create=lambda **kw: NS(
+        content=[NS(type="text", text="ok")], stop_reason="end_turn", usage=NS(input_tokens=5, output_tokens=1)))))
+    assert done.complete("s", "u", max_tokens=300, temperature=None).truncated is False
+
+    def create(finish):
+        return lambda **kw: NS(choices=[NS(message=NS(content="{"), finish_reason=finish)],
+                               usage=NS(prompt_tokens=5, completion_tokens=300))
+
+    for finish, expected in (("length", True), ("stop", False)):
+        o = OpenAICompatibleClient("m", "u", "K", sdk_client=NS(chat=NS(completions=NS(create=create(finish)))))
+        assert o.complete("s", "u", max_tokens=300, temperature=None).truncated is expected
+
+
+def test_truncated_answers_are_tallied_apart_and_still_scored(tmp_path):
+    exp = {f"in{i}": "x" * 40 for i in range(4)}                    # a 10-token answer
+    client = FakeClient("a", exp, seed=0)
+    short = [Job("a", "V01", "Classe.", f"C{i}", f"in{i}", 0, "selection", None, 2) for i in range(4)]
+    roomy = [Job("a", "V02", "Classe.", f"C{i}", f"in{i}", 0, "selection", None, 300) for i in range(4)]
+    res = execute(short + roomy, {"a": ModelRuntime(client, None)}, RunStore(tmp_path), sleep=lambda s: None)
+    stats = truncation_stats(res)
+    assert stats[("a", "V01")].share == 1.0 and stats[("a", "V02")].share == 0.0
+    assert all(r.ok and r.truncated for r in res if r.variant == "V01")  # completed, not failed
+    rates = case_rates([r for r in res if r.variant == "V01"], {f"C{i}": "x" * 40 for i in range(4)}, "exact")
+    assert rates == {f"C{i}": 0.0 for i in range(4)}                  # a cut answer is a wrong answer
+
+
+@pytest.mark.parametrize("status,fragment", [
+    (400, "requête refusée"), (401, "clé API refusée"), (403, "clé API refusée"), (404, "introuvable"),
+])
+def test_client_errors_fail_at_once_with_a_clear_message(tmp_path, status, fragment):
+    calls = []
+
+    def create(**kw):
+        calls.append(1)
+        raise SdkError(status)
+
+    client = AnthropicClient("m", "K", sdk_client=NS(messages=NS(create=create)))
+    slept = []
+    res = execute(jobs_for(["m"], 2, ("V01",)), {"m": ModelRuntime(client, None)}, RunStore(tmp_path),
+                  sleep=slept.append)
+    assert len(calls) == 2 and slept == []                       # one attempt per call, no waiting
+    assert all(r.status == "failed" and fragment in r.error and "tentatives" not in r.error for r in res)
+    assert SECRET not in " ".join(r.error for r in res)
+
+
+def test_missing_usage_fails_at_once_and_says_why(tmp_path):
+    calls = []
+
+    def create(**kw):
+        calls.append(1)
+        return NS(choices=[NS(message=NS(content="x"), finish_reason="stop")], usage=None)
+
+    client = OpenAICompatibleClient("m", "u", "K", sdk_client=NS(chat=NS(completions=NS(create=create))))
+    res = execute(jobs_for(["m"], 1, ("V01",)), {"m": ModelRuntime(client, None)}, RunStore(tmp_path),
+                  sleep=lambda s: None)
+    assert len(calls) == 1 and res[0].status == "failed"
+    assert res[0].error == "l'API ne renvoie pas le nombre de tokens, SAVE Run ne peut pas chiffrer le coût"
+
+
+def test_reuse_key_covers_model_prompt_case_run_temperature_and_max_tokens(tmp_path):
+    base = Job("m", "V01", "prompt", "C001", "entrée", 0, "selection", None, 300)
+    store = RunStore(tmp_path)
+    c = Counting()
+    execute([base], {"m": ModelRuntime(c, None), "m2": ModelRuntime(c, None)}, store, sleep=lambda s: None)
+    assert c.n == 1
+    variations = [
+        Job("m2", "V01", "prompt", "C001", "entrée", 0, "selection", None, 300),    # model
+        Job("m", "V01", "prompt", "C001", "entrée", 1, "selection", None, 300),     # run number
+        Job("m", "V01", "prompt", "C001", "entrée", 0, "selection", 0.0, 300),      # temperature
+        Job("m", "V01", "prompt", "C001", "entrée", 0, "selection", None, 600),     # max_tokens
+        Job("m", "V01", "prompt", "C002", "entrée", 0, "selection", None, 300),     # case id
+        Job("m", "V01", "prompt", "C001", "autre entrée", 0, "selection", None, 300),  # case input
+        Job("m", "V01", "prompt 2", "C001", "entrée", 0, "selection", None, 300),   # prompt
+    ]
+    for v in variations:
+        before = c.n
+        execute([v], {"m": ModelRuntime(c, None), "m2": ModelRuntime(c, None)}, store, sleep=lambda s: None)
+        assert c.n == before + 1, v
+    before = c.n
+    execute([base], {"m": ModelRuntime(c, None)}, store, sleep=lambda s: None)
+    assert c.n == before  # the untouched call is still reused
+
+
+def test_build_jobs_carries_temperature_and_max_tokens():
+    cfg = config(runs_per_case=2, max_tokens=500)
+    cases = [NS(id="C001", input="a"), NS(id="C002", input="b")]
+    jobs = build_jobs([NS(id="V01", system="p")], cfg, cases, "selection")
+    assert len(jobs) == 2 * 1 * 2 * 2                                # models x variants x cases x runs
+    assert {(j.model, j.temperature, j.max_tokens) for j in jobs} == {("a", None, 500), ("b", 0.0, 500)}
+    assert sorted({j.run for j in jobs}) == [0, 1]
