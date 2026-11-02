@@ -8,9 +8,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from .config import Config
-from .cost import PriceTable, cost_per_1000
+from .cost import PriceTable, Savings, cost_per_1000, savings
 from .runner import MAX_FAILED_SHARE, CallResult, untested_models
 from .scoring import case_rates, max_lower_bound, variant_score
+from .variants import BASE_ID
 
 NEAR_TIE_MARGIN = 0.10      # within 10 % of the winner's cost
 INDICATIVE_BELOW = 20       # a validation set smaller than this only gives an indication
@@ -202,3 +203,34 @@ def validate(results: list[CallResult], expected: dict[str, str], selection: Sel
 def winner_confirmed(validations: list[Validation]) -> bool | None:
     """True or False for the winner; None when there was no winner to validate."""
     return next((v.confirmed for v in validations if v.is_winner), None)
+
+
+# --- Economy -------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class Economy:
+    """The saving against the current prompt on the current model, or the reason there is no figure."""
+    reference: Row | None            # BASE on current_model, when it could be measured
+    savings: Savings | None
+    reason: str | None               # why there is no figure; no assumption is ever made
+    equal_quality: bool | None       # the reference itself demonstrates the threshold
+    winner_is_reference: bool = False
+
+
+def compute_economy(selection: Selection, config: Config) -> Economy:
+    if not config.base_prompt:
+        return Economy(None, None, "aucun base_prompt dans la configuration : il n'y a pas de référence à chiffrer.", None)
+    if not config.current_model:
+        return Economy(None, None, "current_model n'est pas renseigné : on ne sait pas sur quel modèle tourne le prompt "
+                       "actuel, aucune économie n'est chiffrée.", None)
+    ref = next((r for r in selection.rows if r.model == config.current_model and r.variant == BASE_ID), None)
+    if ref is None or ref.cost_per_1000 is None:
+        why = f" (statut : {ref.status})" if ref else ""
+        return Economy(None, None, f"le prompt actuel n'a pas pu être mesuré sur {config.current_model}{why} : "
+                       "aucune économie n'est chiffrée.", None)
+    equal = ref.lo + EPS >= selection.threshold
+    if selection.winner is None:
+        return Economy(ref, None, "aucune variante n'est retenue : il n'y a rien à comparer à la référence.", equal)
+    win = selection.winner
+    return Economy(ref, savings(ref.cost_per_1000, win.cost_per_1000, config.monthly_volume), None, equal,
+                   winner_is_reference=(win.model, win.variant) == (ref.model, ref.variant))

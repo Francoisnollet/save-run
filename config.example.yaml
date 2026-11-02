@@ -8,6 +8,10 @@ base_prompt: >-
   Tu es un assistant. Classe le ticket dans une catégorie : facturation,
   technique, livraison ou autre. Réponds uniquement par la catégorie.
 
+# Optionnel : le modèle qui exécute aujourd'hui le prompt actuel (doit figurer dans `models`).
+# Sans `base_prompt` et `current_model`, le rapport affiche les coûts mais aucun chiffre d'économie.
+current_model: modele-exemple-anthropic
+
 # Optionnel : active la variante de persona « métier ».
 role: un agent de support client expérimenté
 

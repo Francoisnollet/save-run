@@ -20,3 +20,6 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
+
+# Sorties de SAVE Run (dossier par défaut)
+saverun-out/

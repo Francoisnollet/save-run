@@ -31,6 +31,7 @@ class Config:
     models: list[ModelConfig]
     base_prompt: str | None = None
     role: str | None = None
+    current_model: str | None = None  # model that runs the current prompt: the reference for the saving
     n_variants: int = 20
     runs_per_case: int = 1
     seuil_qualite: float = 0.75
@@ -103,6 +104,10 @@ def parse_config(data: object) -> Config:
     ids = [m.id for m in models]
     if len(set(ids)) != len(ids):
         raise ConfigError("Identifiants de modèle en double dans models.")
+    current = str(data["current_model"]).strip() if data.get("current_model") else None
+    if current and current not in ids:
+        raise ConfigError(f"current_model « {current} » ne figure pas dans models "
+                          f"(modèles testés : {', '.join(ids)}).")
 
     scoring = data.get("scoring", "exact")
     if scoring not in SCORINGS:
@@ -116,6 +121,7 @@ def parse_config(data: object) -> Config:
         models=models,
         base_prompt=str(data["base_prompt"]).strip() or None if data.get("base_prompt") else None,
         role=str(data["role"]).strip() or None if data.get("role") else None,
+        current_model=current,
         n_variants=_number(data, "n_variants", 20, 1, 100, integer=True),
         runs_per_case=_number(data, "runs_per_case", 1, 1, 20, integer=True),
         seuil_qualite=_number(data, "seuil_qualite", 0.75, 0.01, 0.99),

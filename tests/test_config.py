@@ -66,3 +66,10 @@ def test_dotenv_does_not_override(tmp_path, monkeypatch):
     load_dotenv(env)
     assert os.environ["SR_A"] == "reel" and os.environ["SR_B"] == "deux" and "SR_C" not in os.environ
     monkeypatch.delenv("SR_B")
+
+
+def test_current_model_must_be_one_of_the_tested_models():
+    assert parse_config(base(current_model="m1")).current_model == "m1"
+    assert parse_config(base()).current_model is None
+    with pytest.raises(ConfigError, match="current_model"):
+        parse_config(base(current_model="autre"))
