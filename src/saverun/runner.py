@@ -22,6 +22,7 @@ from .cost import PriceTable, call_cost, estimate_tokens
 MAX_ATTEMPTS = 4          # first try + 3 retries
 BASE_DELAY = 2.0          # seconds, doubled after each failed attempt
 MAX_FAILED_SHARE = 0.10   # above this share of failed calls, a variant is not fairly comparable
+AUTH_STOP_AFTER = 3       # consecutive 401/403 after which a model is stopped and reported "non testé"
 
 
 class TransientError(Exception):
@@ -30,6 +31,10 @@ class TransientError(Exception):
 
 class PermanentError(Exception):
     """Any other failure (400, 401, 404, network, missing usage...): fails at once, no retry."""
+
+
+class AuthError(PermanentError):
+    """401 or 403: the key is refused. Repeated, it stops the model (see AUTH_STOP_AFTER)."""
 
 
 class MissingKeyError(RuntimeError):
@@ -74,7 +79,8 @@ def classify_error(exc: Exception) -> Exception:
     """Map an SDK exception to Transient (429, 5xx) or PermanentError. The SDK's own text is never kept."""
     status = getattr(exc, "status_code", None)
     transient = status == 429 or (status or 0) >= 500
-    return (TransientError if transient else PermanentError)(_describe(status, type(exc).__name__))
+    kind = TransientError if transient else AuthError if status in (401, 403) else PermanentError
+    return kind(_describe(status, type(exc).__name__))
 
 
 def _read_key(env_name: str) -> str:
@@ -280,6 +286,8 @@ def execute(jobs: list[Job], runtimes: dict[str, ModelRuntime], store: RunStore,
     """Run every job; models run in parallel, each paced by its own rate limiter.
 
     A call that still fails after the retries is recorded as "failed" and the run goes on.
+    After AUTH_STOP_AFTER consecutive 401/403 a model is stopped: its remaining jobs get the status
+    "skipped" (not stored, not paid) and the other models carry on. See untested_models().
     Calls already stored with status "ok" are reused, not paid again. Results come back in job order.
     """
     reuse = store.load_ok()
@@ -289,31 +297,46 @@ def execute(jobs: list[Job], runtimes: dict[str, ModelRuntime], store: RunStore,
         by_model.setdefault(j.model, []).append(i)
     progress_lock = threading.Lock()
 
-    def one(job: Job) -> CallResult:
-        base = dict(model=job.model, variant=job.variant, prompt_hash=_sha(job.system), case=job.case,
+    def base(job: Job) -> dict:
+        return dict(model=job.model, variant=job.variant, prompt_hash=_sha(job.system), case=job.case,
                     input_hash=_sha(job.input), run=job.run, phase=job.phase,
                     temperature=job.temperature, max_tokens=job.max_tokens)
+
+    def one(job: Job) -> tuple[CallResult, bool]:
+        """The result, and whether it was a key refusal (401/403)."""
         cached = reuse.get(job.key)
         if cached:
-            return replace(cached, variant=job.variant, phase=job.phase)
+            return replace(cached, variant=job.variant, phase=job.phase), False
         rt = runtimes[job.model]
+        refused = False
         try:
             c = complete_with_retry(rt.client, rt.limiter, job.system, job.input, max_tokens=job.max_tokens,
                                     temperature=job.temperature, sleep=sleep)
-            res = CallResult(**base, status="ok", output=c.text, tokens_in=c.tokens_in,
+            res = CallResult(**base(job), status="ok", output=c.text, tokens_in=c.tokens_in,
                              tokens_out=c.tokens_out, truncated=c.truncated)
         except (TransientError, PermanentError) as e:
             suffix = f", après {MAX_ATTEMPTS} tentatives" if isinstance(e, TransientError) else ""
-            res = CallResult(**base, status="failed", error=f"{e}{suffix}")
+            res = CallResult(**base(job), status="failed", error=f"{e}{suffix}")
+            refused = isinstance(e, AuthError)
         store.append(res)
-        return res
+        return res, refused
 
     def worker(indexes: list[int]) -> None:
+        streak, stop_reason = 0, None
         for i in indexes:
-            results[i] = one(jobs[i])
+            job = jobs[i]
+            if stop_reason:
+                res = CallResult(**base(job), status="skipped", error=stop_reason)
+            else:
+                res, refused = one(job)
+                streak = streak + 1 if refused else 0
+                if streak >= AUTH_STOP_AFTER:
+                    stop_reason = (f"{res.error} ; {AUTH_STOP_AFTER} refus consécutifs, "
+                                   "modèle arrêté et non testé")
+            results[i] = res
             if progress:
                 with progress_lock:
-                    progress(results[i])
+                    progress(res)
 
     with ThreadPoolExecutor(max_workers=max(1, len(by_model))) as pool:
         for f in [pool.submit(worker, idx) for idx in by_model.values()]:
@@ -344,8 +367,13 @@ def _tally(results: list[CallResult], pick, counts) -> dict[tuple[str, str], Tal
 
 
 def failure_stats(results: list[CallResult]) -> dict[tuple[str, str], Tally]:
-    """Failed calls out of all calls, per (model, variant)."""
-    return _tally(results, lambda r: True, lambda r: not r.ok)
+    """Failed calls out of all attempted calls, per (model, variant). Skipped calls were never attempted."""
+    return _tally(results, lambda r: r.status != "skipped", lambda r: not r.ok)
+
+
+def untested_models(results: list[CallResult]) -> dict[str, str]:
+    """Models stopped after repeated key refusals, with the reason. The report marks them "non testé"."""
+    return {r.model: r.error for r in results if r.status == "skipped"}
 
 
 def truncation_stats(results: list[CallResult]) -> dict[tuple[str, str], Tally]:
@@ -391,7 +419,14 @@ def preflight(jobs: list[Job], prices: PriceTable, max_calls: int | None,
                      prices.warnings(models))
 
 
-def build_jobs(variants, config: Config, cases, phase: str) -> list[Job]:
-    """One job per (model, variant, case, run). `variants` only need `.id` and `.system`."""
-    return [Job(m.id, v.id, v.system, c.id, c.input, run, phase, m.temperature, config.max_tokens)
-            for m in config.models for v in variants for c in cases for run in range(config.runs_per_case)]
+def build_jobs(variants, config: Config, cases, phase: str,
+               pairs: list[tuple[str, str]] | None = None) -> list[Job]:
+    """One job per (model, variant, case, run). `variants` only need `.id` and `.system`.
+
+    `pairs` restricts the jobs to given (model id, variant id) pairs, e.g. the candidates to validate.
+    """
+    models = {m.id: m for m in config.models}
+    by_id = {v.id: v for v in variants}
+    todo = pairs if pairs is not None else [(m.id, v.id) for m in config.models for v in variants]
+    return [Job(mid, vid, by_id[vid].system, c.id, c.input, run, phase, models[mid].temperature, config.max_tokens)
+            for mid, vid in todo for c in cases for run in range(config.runs_per_case)]

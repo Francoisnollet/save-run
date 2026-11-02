@@ -9,7 +9,8 @@ from saverun.fake import FakeClient
 from saverun.runner import (AnthropicClient, CallResult, Completion, Job, MaxCallsError, MissingKeyError,
                             ModelRuntime, OpenAICompatibleClient, PermanentError, RateLimiter, RunStore,
                             TransientError, build_runtimes, classify_error, complete_with_retry, execute,
-                            build_jobs, failure_stats, preflight, truncation_stats, unfair_variants)
+                            build_jobs, failure_stats, preflight, truncation_stats, unfair_variants,
+                            untested_models)
 from saverun.scoring import case_rates
 
 SECRET = "sk-SECRET-0123456789"
@@ -408,3 +409,60 @@ def test_build_jobs_carries_temperature_and_max_tokens():
     assert len(jobs) == 2 * 1 * 2 * 2                                # models x variants x cases x runs
     assert {(j.model, j.temperature, j.max_tokens) for j in jobs} == {("a", None, 500), ("b", 0.0, 500)}
     assert sorted({j.run for j in jobs}) == [0, 1]
+
+
+# --- key refusals stop the model, not the run ----------------------------------------------
+
+class Scripted:
+    """Answers with a fixed script of outcomes: an int is an HTTP error status, anything else a success."""
+
+    def __init__(self, script):
+        self.script, self.n = list(script), 0
+
+    def complete(self, system, user, *, max_tokens, temperature):
+        step = self.script[min(self.n, len(self.script) - 1)]
+        self.n += 1
+        if isinstance(step, int):
+            raise classify_error(SdkError(step))
+        return Completion("ok", 5, 1)
+
+
+def test_three_consecutive_key_refusals_stop_only_that_model(tmp_path):
+    bad, good = Scripted([401]), Scripted(["ok"])
+    jobs = jobs_for(["bad", "good"], n_cases=6)                 # 12 jobs per model
+    store = RunStore(tmp_path)
+    res = execute(jobs, {"bad": ModelRuntime(bad, None), "good": ModelRuntime(good, None)}, store,
+                  sleep=lambda s: None)
+    assert bad.n == 3                                             # stopped: no more calls, no more waiting
+    assert good.n == 12 and all(r.ok for r in res if r.model == "good")
+    bads = [r for r in res if r.model == "bad"]
+    assert [r.status for r in bads] == ["failed"] * 3 + ["skipped"] * 9
+    assert "3 refus consécutifs" in bads[-1].error and "non testé" in bads[-1].error
+    assert "clé API refusée" in bads[-1].error and SECRET not in bads[-1].error
+    assert list(untested_models(res)) == ["bad"]
+    assert all(r.status != "skipped" for r in store.read_all())   # skipped calls are not stored
+    stats = failure_stats(res)
+    assert stats[("bad", "V01")].total == 3 and stats[("good", "V01")].count == 0  # skipped never attempted
+
+
+def test_a_success_resets_the_refusal_streak():
+    c = Scripted([401, 403, "ok", 401, 401, "ok"])
+    res = execute(jobs_for(["m"], n_cases=6, variants=("V01",)), {"m": ModelRuntime(c, None)},
+                  _NullStore(), sleep=lambda s: None)
+    assert c.n == 6 and not untested_models(res)
+    assert [r.status for r in res] == ["failed", "failed", "ok", "failed", "failed", "ok"]
+
+
+def test_other_client_errors_never_stop_a_model(tmp_path):
+    c = Scripted([400])
+    res = execute(jobs_for(["m"], n_cases=6, variants=("V01",)), {"m": ModelRuntime(c, None)},
+                  RunStore(tmp_path), sleep=lambda s: None)
+    assert c.n == 6 and all(r.status == "failed" for r in res) and not untested_models(res)
+
+
+class _NullStore:
+    def load_ok(self):
+        return {}
+
+    def append(self, result):
+        pass

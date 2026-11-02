@@ -63,7 +63,7 @@ SAVE Run sera publié en open source pour faire connaître son auteur (marque al
 3. Exécuter chaque variante sur chaque cas de sélection, pour chaque modèle ; enregistrer sortie et tokens renvoyés par l'API dans `runs/`.
 4. Noter : taux de réussite du cas, puis note de la variante avec intervalle de Wilson à 95 %.
 5. Sélectionner (règles ci-dessous).
-6. Valider le gagnant, et ses quasi-égaux, sur l'ensemble de validation. Si la borne basse y passe sous le seuil, le dire clairement.
+6. Valider le gagnant, et ses quasi-égaux, sur l'ensemble de validation (critère ci-dessous : note brute, pas borne basse). Le gagnant est « confirmé » ou « non confirmée » ; le résultat des quasi-égaux est affiché sans changer la recommandation.
 7. Produire le rapport et l'export.
 
 ## Règles statistiques (non négociables)
@@ -72,7 +72,12 @@ SAVE Run sera publié en open source pour faire connaître son auteur (marque al
 - **Sélection** : la moins chère dont la **borne basse** de l'intervalle atteint le seuil. Jamais « la meilleure note brute ». Si aucune variante ne démontre le seuil, le dire et suggérer de baisser le seuil ou d'ajouter des cas.
 - **Égalités** : les variantes qui démontrent aussi le seuil, à moins de 10 % du coût de la retenue, sont signalées comme quasi à égalité.
 - **`runs_per_case`** : stabilise la note d'un cas, ne resserre pas l'intervalle. À température 0 il est inutile : avertir.
-- La validation ne sert qu'à confirmer ; ne jamais re-sélectionner sur l'ensemble de validation.
+- **Atteignabilité du seuil** : avant le lancement, afficher « avec N cas de sélection, la borne basse maximale possible est X % » (une variante parfaite a pour borne basse `N / (N + 1,96²)`). Si X est sous le seuil, dire que le seuil est inatteignable et combien de cas il faut. Aucun défaut n'est modifié pour autant.
+- **Validation** : elle ne sert qu'à confirmer ; ne jamais re-sélectionner sur l'ensemble de validation.
+  - *Critère de confirmation* : le gagnant est « confirmé » si sa **note brute** sur l'ensemble de validation atteint le seuil. L'intervalle de Wilson est toujours affiché, mais il ne décide pas : sur un petit ensemble la borne basse ne peut pas atteindre le seuil (4 cas : environ 51 % au mieux ; 11 cas : environ 74 %), ce qui rendrait toute confirmation impossible. (Version précédente du brief : « la borne basse doit passer le seuil » ; abandonnée pour cette raison.)
+  - *Ensemble de validation de moins de 20 cas* : le rapport indique « indicatif ».
+  - *Gagnant non confirmé* : ne basculer sur aucun autre candidat (ce serait re-sélectionner sur la validation). Le rapport dit « non confirmée » et suggère d'ajouter des cas.
+  - *Quasi-égaux* : validés aussi, résultats affichés, recommandation inchangée.
 
 ## Coût
 
@@ -86,7 +91,10 @@ SAVE Run sera publié en open source pour faire connaître son auteur (marque al
 
 - Deux adaptateurs : `anthropic` et `openai_compatible` (URL de base configurable).
 - Le catalogue gratuit de build.nvidia.com serait atteignable par le second. Selon des sources tierces non confirmées, l'URL de base est `https://integrate.api.nvidia.com/v1` et la limite est d'environ 40 requêtes par minute et par modèle, pour du prototypage seulement. **À vérifier dans la documentation officielle de NVIDIA ; ne rien coder en dur.**
-- Limiteur de débit par modèle (`rpm`), nouvelle tentative avec attente croissante sur erreur 429 ou 5xx, limitée ; si elle échoue, la ligne est marquée en échec sans faire tomber le reste.
+- Limiteur de débit par modèle (`rpm`), nouvelle tentative avec attente croissante **uniquement** sur erreur 429 ou 5xx, limitée (4 essais) ; si elle échoue, la ligne est marquée en échec sans faire tomber le reste. Un 400, un 401, un 404, une erreur réseau ou un `usage` absent échouent aussitôt, avec un message clair sans texte du SDK.
+- Un appel en échec est **exclu de la note** (il ne compte pas comme une mauvaise réponse) ; le rapport signale les variantes dont plus de 10 % des appels ont échoué.
+- Après **3 refus de clé (401 ou 403) consécutifs**, le modèle concerné est arrêté (les autres continuent) ; le rapport le marque « non testé » avec la raison.
+- Les réponses tronquées (`max_tokens` atteint) restent notées comme les autres, mais leur part par variante est comptée à part et le rapport conseille d'augmenter `max_tokens`.
 
 ## Sortie
 
@@ -135,7 +143,7 @@ save-run/
 
 ## Tests attendus
 
-Tests unitaires sur Wilson (valeurs vérifiables à la main), la notation, le coût, la séparation des cas (aucun chevauchement) et la sélection (seuil, aucune variante retenue, égalités). Test de bout en bout avec `--dry-run`. Test du diagnostic sur `calls.example.csv`.
+Tests unitaires sur Wilson (valeurs vérifiables à la main), la notation, le coût, la séparation des cas (aucun chevauchement) et la sélection (seuil sur la borne basse, aucune variante retenue, égalités, validation sur note brute sans bascule vers un autre candidat). Test de bout en bout avec `--dry-run`. Test du diagnostic sur `calls.example.csv`.
 
 ## Façon de travailler
 
@@ -148,3 +156,13 @@ Tests unitaires sur Wilson (valeurs vérifiables à la main), la notation, le co
 ## Terminé quand
 
 Avec un `config.yaml` et un `cases.csv` réels, `saverun run` produit le tableau, `report.md`, `best_prompt.txt` et `best_config.json`, avec une colonne de coût cohérente avec les tokens renvoyés par l'API et une validation sur cas mis de côté. `saverun diagnose` classe la dépense par tâche. `--dry-run` et les tests passent.
+
+## Décisions de construction (ajoutées pendant la v0)
+
+Choix faits avec l'auteur en cours de route ; ils complètent ou précisent le brief.
+
+- **Configuration** : champs ajoutés `role` (active la persona « métier »), `fields` (champs comparés en `json_fields`), `seed` (séparation des cas et tirage des variantes), `max_tokens` (300 par défaut, à augmenter pour de l'extraction JSON). `temperature` par modèle est optionnelle : absente, elle n'est jamais envoyée à l'API et le rapport indique « température : défaut du fournisseur » ; l'avertissement sur `runs_per_case` ne vaut que pour une température explicitement à 0.
+- **Notation** : `json_fields` est tout-ou-rien (nécessaire pour Wilson) ; le détail par champ est indicatif dans le rapport. Les doublons d'`input` dans `cases.csv` sont retirés avec un avertissement.
+- **Prix** : `prices.yaml` porte une `currency` (aucune conversion, le rapport affiche cette monnaie), et une `date` et une `source` par modèle. Un modèle absent bloque le lancement.
+- **Variantes** : la combinaison la plus sobre est toujours `V01` ; les autres sont tirées avec la graine. Le `base_prompt` est exécuté comme variante de référence `BASE`.
+- **Réutilisation de `runs/`** : un appel déjà réussi n'est pas repayé si modèle, prompt, cas (id et texte), passage, température et `max_tokens` sont identiques.
