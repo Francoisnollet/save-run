@@ -10,13 +10,14 @@ from rich.console import Console
 from . import __version__
 from .config import ConfigError, load_config, load_dotenv
 from .cost import PriceError, load_prices
+from .diagnose import (DEFAULT_COVERAGE, DEFAULT_INTEREST_THRESHOLD, DiagnoseError, diagnose, write_csv)
 from .pipeline import Plan, execute_plan, prepare
-from .report import SIMULATION_BANNER, num, print_summary, write_outputs
+from .report import SIMULATION_BANNER, num, pct, print_summary, write_outputs
 from .runner import MaxCallsError, MissingKeyError, RunStore, build_runtimes
 from .scoring import ScoringError
 from .splitting import CasesError, load_cases
 
-USER_ERRORS = (ConfigError, CasesError, PriceError, ScoringError, MissingKeyError, MaxCallsError)
+USER_ERRORS = (ConfigError, CasesError, PriceError, ScoringError, MissingKeyError, MaxCallsError, DiagnoseError)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -34,7 +35,46 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--seed", type=int, help="--dry-run seulement : change le hasard du faux modèle")
     run.add_argument("--yes", action="store_true", help="ne pas demander confirmation avant les appels payants")
     run.add_argument("--no-footer", action="store_true", help="retirer la ligne finale de report.md")
+    diag = sub.add_parser("diagnose", help="où part l'argent : dépense par tâche à partir d'un export d'appels")
+    diag.add_argument("calls", help="CSV : date, tache, modele, tokens_entree, tokens_sortie")
+    diag.add_argument("--prices", default="prices.yaml")
+    diag.add_argument("--part", type=float, default=DEFAULT_COVERAGE,
+                      help="part de la dépense que les tâches retenues doivent couvrir (défaut : 0,80)")
+    diag.add_argument("--seuil-interet", type=float, default=DEFAULT_INTEREST_THRESHOLD,
+                      help="dépense mensuelle, dans la monnaie de prices.yaml, sous laquelle l'optimisation ne vaut "
+                           f"sans doute pas le temps passé. Valeur par défaut ARBITRAIRE ({DEFAULT_INTEREST_THRESHOLD:g}) : "
+                           "à fixer selon votre offre.")
+    diag.add_argument("--out", default="saverun-out/diagnostic.csv")
     return parser
+
+
+def cmd_diagnose(args: argparse.Namespace, console: Console) -> int:
+    d = diagnose(args.calls, load_prices(args.prices), args.part, args.seuil_interet)
+    cur = d.currency
+    console.print(f"{d.n_calls} appels sur {d.days} jour(s), du {d.first} au {d.last}.", highlight=False)
+    from rich.table import Table
+    t = Table()
+    for name, justify in [("Tâche", "left"), ("Appels/mois", "right"), (f"{cur}/mois", "right"),
+                          ("Part", "right"), ("Cumul", "right"), ("Modèle principal", "left"), ("", "left")]:
+        t.add_column(name, justify=justify, no_wrap=True)
+    for r in d.rows:
+        t.add_row(r.task, f"{r.calls_per_month:.0f}", num(r.cost_per_month, 2), pct(r.share), pct(r.cumulative),
+                  r.main_model, "◄" if r.to_optimize else "")
+    console.print(t)
+    console.print(f"Total valorisé : {num(d.monthly_total, 2)} {cur} par mois au rythme observé "
+                  f"({num(d.monthly_total * 12, 0)} {cur} par an).", highlight=False)
+    if not d.worth_optimizing:
+        console.print(f"-> Sous {args.seuil_interet:g} {cur} par mois : l'optimisation ne se justifie sans doute pas "
+                      "(seuil arbitraire, réglable avec --seuil-interet).", highlight=False)
+    elif d.selected:
+        console.print(f"-> À optimiser en priorité ({pct(d.coverage)} de la dépense) : {', '.join(d.selected)}",
+                      highlight=False)
+    console.print("◄ = tâche retenue pour un test SAVE Run.", highlight=False)
+    for w in d.warnings:
+        console.print(f"! {w}", highlight=False)
+    write_csv(Path(args.out), d)
+    console.print(f"Détail écrit dans {args.out}", highlight=False)
+    return 0
 
 
 def _print_plan(plan: Plan, console: Console) -> None:
@@ -108,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     console = Console()
     try:
-        return cmd_run(args, console)
+        return cmd_diagnose(args, console) if args.command == "diagnose" else cmd_run(args, console)
     except USER_ERRORS as e:
         print(f"Erreur : {e}", file=sys.stderr)
         return 2
