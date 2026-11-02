@@ -1,0 +1,34 @@
+# Exemple de configuration SAVE Run. Copiez en config.yaml et adaptez.
+intention: >-
+  Classe le ticket de support client dans une seule catégorie parmi :
+  facturation, technique, livraison, autre.
+
+# Optionnel : le prompt actuel, utilisé comme référence pour chiffrer l'économie.
+base_prompt: >-
+  Tu es un assistant. Classe le ticket dans une catégorie : facturation,
+  technique, livraison ou autre. Réponds uniquement par la catégorie.
+
+# Optionnel : active la variante de persona « métier ».
+role: un agent de support client expérimenté
+
+models:
+  - id: modele-exemple-anthropic        # identifiant exact chez le fournisseur
+    provider: anthropic
+    api_key_env: ANTHROPIC_API_KEY
+    rpm: 50                             # requêtes par minute
+    # temperature: 0                    # optionnel ; absent = non envoyé à l'API
+  - id: modele-exemple-compatible
+    provider: openai_compatible
+    base_url: https://exemple.invalid/v1   # À VÉRIFIER dans la documentation du fournisseur
+    api_key_env: EXEMPLE_API_KEY
+    rpm: 30
+
+n_variants: 20
+runs_per_case: 1
+seuil_qualite: 0.75
+validation_part: 0.25
+max_calls: 2000
+scoring: exact            # exact | json_fields
+# fields: [categorie]     # json_fields seulement ; par défaut, toutes les clés de `expected`
+# monthly_volume: 50000   # optionnel : appels par mois, pour chiffrer l'économie
+seed: 0                   # graine de la séparation des cas et des variantes

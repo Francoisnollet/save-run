@@ -1,0 +1,22 @@
+# Secrets
+.env
+*.key
+
+# Sorties de SAVE Run
+runs/
+results.csv
+report.md
+best_prompt.txt
+best_config.json
+diagnostic.csv
+config.yaml
+cases.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/

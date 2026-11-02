@@ -1,0 +1,31 @@
+input,expected
+Je n'ai pas reçu ma facture de septembre,facturation
+Mon colis est bloqué depuis cinq jours,livraison
+L'application se ferme au démarrage,technique
+Vous m'avez prélevé deux fois ce mois-ci,facturation
+Le livreur a laissé le colis chez un voisin que je ne connais pas,livraison
+Je n'arrive plus à me connecter à mon compte,technique
+Pouvez-vous me rappeler le numéro de mon contrat ?,autre
+Le tarif affiché sur mon avoir ne correspond pas à mon devis,facturation
+Mon colis est arrivé abîmé,livraison
+La page de paiement affiche une erreur,technique
+Je voudrais changer l'adresse de facturation,facturation
+Le suivi de livraison n'a pas bougé depuis hier,livraison
+L'export PDF de mes documents est vide,technique
+Bravo pour votre service client,autre
+Je souhaite une copie de ma dernière facture,facturation
+Le colis a été livré à la mauvaise adresse,livraison
+Le site est très lent depuis ce matin,technique
+Quels sont vos horaires d'ouverture ?,autre
+Je conteste un frais de dossier sur ma facture,facturation
+Mon colis n'est jamais arrivé,livraison
+Une notification d'erreur apparaît à chaque ouverture,technique
+Comment résilier mon abonnement ?,autre
+Ma facture mentionne un article que je n'ai pas commandé,facturation
+Le transporteur n'est pas venu au rendez-vous,livraison
+Impossible de télécharger la mise à jour,technique
+Je cherche un contact pour un partenariat,autre
+Le montant de ma dernière facture a doublé,facturation
+Mon colis est resté au point relais fermé,livraison
+L'application ne synchronise plus mes données,technique
+Pouvez-vous me confirmer la réception de mon courrier ?,autre
