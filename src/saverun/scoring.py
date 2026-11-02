@@ -119,3 +119,16 @@ def score_output(output: str, expected: str, scoring: str, fields: list[str] | N
         detail = {f: got is not None and f in got and _norm(got[f]) == _norm(exp[f]) for f in names}
         return Score(all(detail.values()), detail)  # all-or-nothing; detail is informative only
     raise ValueError(f"scoring inconnu : {scoring}")
+
+
+def case_rates(results, expected: dict[str, str], scoring: str, fields: list[str] | None = None) -> dict[str, float]:
+    """Success rate per case over the runs that completed (duck-typed runner.CallResult list).
+
+    A failed call is excluded, never counted as a wrong answer. A case whose every run failed is left out,
+    so the interval then rests on fewer cases and widens accordingly.
+    """
+    per_case: dict[str, list[bool]] = {}
+    for r in results:
+        if r.status == "ok":
+            per_case.setdefault(r.case, []).append(score_output(r.output, expected[r.case], scoring, fields).correct)
+    return {case: sum(v) / len(v) for case, v in per_case.items()}

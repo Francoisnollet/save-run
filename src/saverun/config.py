@@ -36,6 +36,7 @@ class Config:
     seuil_qualite: float = 0.75
     validation_part: float = 0.25
     max_calls: int | None = None
+    max_tokens: int = 300  # output ceiling per call
     scoring: str = "exact"
     fields: list[str] | None = None
     monthly_volume: float | None = None
@@ -120,6 +121,7 @@ def parse_config(data: object) -> Config:
         seuil_qualite=_number(data, "seuil_qualite", 0.75, 0.01, 0.99),
         validation_part=_number(data, "validation_part", 0.25, 0.05, 0.5),
         max_calls=_number(data, "max_calls", None, 1, 10**9, integer=True, optional=True),
+        max_tokens=_number(data, "max_tokens", 300, 16, 32000, integer=True),
         scoring=scoring,
         fields=[str(f) for f in fields] if fields else None,
         monthly_volume=_number(data, "monthly_volume", None, 1, 10**12, optional=True),

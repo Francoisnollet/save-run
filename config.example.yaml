@@ -28,6 +28,7 @@ runs_per_case: 1
 seuil_qualite: 0.75
 validation_part: 0.25
 max_calls: 2000
+max_tokens: 300        # plafond de tokens en sortie par appel (relevez-le pour le raisonnement ou le JSON long)
 scoring: exact            # exact | json_fields
 # fields: [categorie]     # json_fields seulement ; par défaut, toutes les clés de `expected`
 # monthly_volume: 50000   # optionnel : appels par mois, pour chiffrer l'économie
