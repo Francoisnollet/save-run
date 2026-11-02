@@ -1,0 +1,41 @@
+# Prix par million de tokens, par modèle. SAVE Run n'invente aucun prix.
+#
+# Les valeurs ci-dessous sont des EXEMPLES FICTIFS, marquées « À VÉRIFIER » : remplacez-les par les tarifs
+# du moment (page de prix du fournisseur), avec la date du relevé et l'URL de la source.
+# Un modèle absent de ce fichier bloque le lancement ; il n'est jamais valorisé à zéro.
+#
+# `currency` est la monnaie du fichier : SAVE Run n'effectue aucune conversion et l'affiche telle quelle.
+# `free: true` : modèle gratuit (palier d'essai). Les tarifs saisis sont alors un TARIF DE RÉFÉRENCE
+# explicite, et les coûts sont présentés comme « coût estimé ».
+currency: EUR
+
+models:
+  modele-exemple-anthropic:
+    input_per_million: 1.00     # À VÉRIFIER
+    output_per_million: 5.00    # À VÉRIFIER
+    date: "À VÉRIFIER"
+    source: "À VÉRIFIER"
+
+  modele-exemple-compatible:
+    free: true
+    input_per_million: 0.20     # tarif de référence, À VÉRIFIER
+    output_per_million: 1.00    # tarif de référence, À VÉRIFIER
+    date: "À VÉRIFIER"
+    source: "À VÉRIFIER"
+
+  # Modèles fictifs de l'export d'exemple du diagnostic (prototypes/calls.example.csv)
+  modele_A:
+    input_per_million: 0.20     # À VÉRIFIER
+    output_per_million: 1.00    # À VÉRIFIER
+    date: "À VÉRIFIER"
+    source: "À VÉRIFIER"
+  modele_B:
+    input_per_million: 1.00     # À VÉRIFIER
+    output_per_million: 5.00    # À VÉRIFIER
+    date: "À VÉRIFIER"
+    source: "À VÉRIFIER"
+  modele_C:
+    input_per_million: 3.00     # À VÉRIFIER
+    output_per_million: 15.00   # À VÉRIFIER
+    date: "À VÉRIFIER"
+    source: "À VÉRIFIER"
