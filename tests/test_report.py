@@ -246,3 +246,21 @@ def test_validation_wording():
     text = " ".join(validation_lines(o))
     assert "Indicatif" in text and "Non confirmée" in text and "re-sélectionner" in text
     assert "Aucune validation" in validation_lines(outcome([row("V01", 0.2, 3, 10)]))[0]
+
+
+def test_readme_example_is_the_real_output_of_the_example_files(tmp_path):
+    """The README example must not drift from what `saverun run --dry-run` actually produces."""
+    main(example_args(tmp_path, "--dry-run"))
+    report = (tmp_path / "out" / "report.md").read_text(encoding="utf-8")
+    verdict_line = report.split("## Verdict")[1].split("\n\n")[1].strip()
+    readme = open("README.md", encoding="utf-8").read()
+    assert verdict_line in readme and SIMULATION_BANNER in readme
+    rows = {(r["variant"], r["model"]): r for r in csv.DictReader((tmp_path / "out" / "results.csv").open(encoding="utf-8"))}
+    for key in [("V01", "modele-exemple-compatible"), ("V20", "modele-exemple-compatible"),
+                ("V18", "modele-exemple-anthropic"), ("V03", "modele-exemple-anthropic"),
+                ("BASE", "modele-exemple-anthropic")]:
+        r = rows[key]
+        cost = f"{float(r['cost_per_1000']):.3f}".replace(".", ",")
+        assert f"| {cost}" in readme or f"{cost} \*" in readme, key
+    assert rows[("V03", "modele-exemple-anthropic")]["status"] == "retenue"
+    assert rows[("BASE", "modele-exemple-anthropic")]["status"] == "seuil démontré, plus chère"

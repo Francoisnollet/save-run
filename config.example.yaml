@@ -5,8 +5,15 @@ intention: >-
 
 # Optionnel : le prompt actuel, utilisé comme référence pour chiffrer l'économie.
 base_prompt: >-
-  Tu es un assistant. Classe le ticket dans une catégorie : facturation,
-  technique, livraison ou autre. Réponds uniquement par la catégorie.
+  Tu es un agent de support client très rigoureux, en charge du tri des tickets. Lis attentivement
+  le message du client, repère le sujet principal, puis classe le ticket dans une seule catégorie
+  parmi : facturation, technique, livraison, autre. Exemples : « Je n'ai pas reçu ma facture de
+  septembre » donne facturation ; « L'application se ferme au démarrage » donne technique ; « Mon
+  colis est bloqué depuis cinq jours » donne livraison ; « Pouvez-vous me rappeler le numéro de mon
+  contrat ? » donne autre. Réfléchis étape par étape avant de répondre : identifie les indices,
+  écarte les catégories improbables, puis écris la catégorie finale après « Réponse : ». Ne donne
+  jamais d'explication dans la réponse finale, uniquement le nom de la catégorie. En cas
+  d'hésitation entre deux catégories, choisis celle qui correspond au problème principal du client.
 
 # Optionnel : le modèle qui exécute aujourd'hui le prompt actuel (doit figurer dans `models`).
 # Sans `base_prompt` et `current_model`, le rapport affiche les coûts mais aucun chiffre d'économie.
