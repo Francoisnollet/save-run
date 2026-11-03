@@ -5,7 +5,7 @@ from saverun.fake import EXAMPLES_CUE, FINAL_MARKER, PERSONA_CUE, REASONING_CUE
 from saverun.runner import build_jobs
 from saverun.scoring import ANSWER_MARKER
 from saverun.splitting import Case
-from saverun.variants import BASE_ID, base_variant, build_variants
+from saverun.variants import BASE_ID, REASONING, REASONING_WITH_FORMAT, base_variant, build_variants
 
 MODEL = {"id": "m", "provider": "anthropic", "api_key_env": "K", "rpm": 10}
 EXAMPLES = [Case(f"C{i}", f"ticket {i}", f"cat{i}") for i in range(1, 4)]
@@ -85,3 +85,59 @@ def test_jobs_cover_variants_models_cases_and_runs():
     cases = [Case(f"C{i}", f"in{i}", "x") for i in range(1, 7)]
     jobs = build_jobs(variants + [base_variant(cfg(base_prompt="p"))], cfg(runs_per_case=2), cases, "selection")
     assert len(jobs) == 6 * 1 * 6 * 2 and len({j.key for j in jobs}) == len(jobs)
+
+
+# --- output_format: how the model must answer, in every generated variant ------------------------------
+
+FORMAT = 'Réponds avec le JSON brut uniquement, sans balises markdown : {"urgent": true ou false}'
+
+
+def test_output_format_is_in_every_variant_including_the_one_without_examples():
+    variants, _ = build_variants(cfg(scoring="json_fields", output_format=FORMAT), EXAMPLES, n=24)
+    assert all(FORMAT in v.system for v in variants)
+    v01 = variants[0]
+    assert (v01.shots, v01.reasoning) == (0, False)
+    assert v01.system == f"Classe le ticket.\n\n{FORMAT}"          # intention, then the format: nothing else
+
+
+def test_without_reasoning_the_format_replaces_the_generic_format_line():
+    variants, _ = build_variants(cfg(scoring="json_fields", output_format=FORMAT), EXAMPLES, n=24)
+    for v in (v for v in variants if not v.reasoning):
+        assert v.system.endswith(FORMAT) and "objet JSON valide" not in v.system
+        assert v.system.count(FORMAT) == 1
+
+
+def test_with_reasoning_the_format_is_scoped_to_what_follows_the_marker():
+    variants, _ = build_variants(cfg(scoring="json_fields", output_format=FORMAT), EXAMPLES, n=24)
+    reasoning = [v for v in variants if v.reasoning]
+    assert reasoning
+    for v in reasoning:
+        assert v.system.count(FORMAT) == 1
+        assert v.system.index(FORMAT) < v.system.index("Réfléchis d'abord étape par étape")   # format, then how to think
+        assert v.system.endswith(REASONING_WITH_FORMAT)
+        assert f"Ce format ne s'applique qu'à ce qui suit « {ANSWER_MARKER} »" in v.system     # no clash with "sans texte avant ou après"
+        assert "ton raisonnement reste libre" in v.system and "au format demandé ci-dessus" in v.system
+
+
+def test_reasoning_without_output_format_keeps_its_original_wording():
+    variants, _ = build_variants(cfg(), EXAMPLES, n=24)
+    assert all(v.system.endswith(REASONING) for v in variants if v.reasoning)
+
+
+def test_examples_come_before_the_format_so_the_format_stays_last():
+    variants, _ = build_variants(cfg(output_format=FORMAT), EXAMPLES, n=24)
+    shots = [v for v in variants if v.shots == 3 and not v.reasoning]
+    assert shots and all(v.system.index("Exemples :") < v.system.index(FORMAT) for v in shots)
+
+
+def test_without_output_format_prompts_are_unchanged():
+    variants, _ = build_variants(cfg(), EXAMPLES, n=1)
+    assert variants[0].system == "Classe le ticket.\n\nRéponds uniquement par la réponse attendue, sans explication."
+
+
+def test_fake_model_cues_still_match_with_an_output_format():
+    variants, _ = build_variants(cfg(output_format=FORMAT), EXAMPLES, n=24)
+    for v in variants:
+        assert (EXAMPLES_CUE in v.system) == (v.shots == 3)
+        assert (REASONING_CUE in v.system) == v.reasoning
+        assert (PERSONA_CUE in v.system) == (v.persona != "aucun")

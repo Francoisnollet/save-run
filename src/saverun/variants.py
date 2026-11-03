@@ -21,6 +21,13 @@ LONG_SUFFIX = " Lis attentivement la demande et applique la consigne telle quell
 FORMAT_EXACT = "Réponds uniquement par la réponse attendue, sans explication."
 FORMAT_JSON = "Réponds uniquement par un objet JSON valide, sans autre texte."
 REASONING = f"Réfléchis étape par étape, puis écris la réponse finale après « {ANSWER_MARKER} »."
+# With an output_format, the reasoning instruction says where the format applies, so that a format such as
+# "JSON only, no text before or after" cannot contradict "think first": it binds only what follows the marker.
+REASONING_WITH_FORMAT = (
+    "Réfléchis d'abord étape par étape, en écrivant ton raisonnement. "
+    f"Puis écris « {ANSWER_MARKER} » suivi de ta réponse finale, au format demandé ci-dessus. "
+    f"Ce format ne s'applique qu'à ce qui suit « {ANSWER_MARKER} » : ton raisonnement reste libre, "
+    "et rien ne doit suivre la réponse.")
 
 
 @dataclass(frozen=True)
@@ -57,7 +64,11 @@ def render(config: Config, examples: list[Case], persona: str, shots: int, reaso
     if shots:
         shown = "\n".join(f"Entrée : {e.input}\nSortie : {e.expected}" for e in examples[:shots])
         parts.append("Exemples :\n" + shown)
-    if reasoning:
+    if config.output_format:
+        parts.append(config.output_format)      # replaces the generic format line, to avoid saying it twice
+        if reasoning:
+            parts.append(REASONING_WITH_FORMAT)
+    elif reasoning:
         parts.append(REASONING)
     else:
         parts.append(FORMAT_JSON if config.scoring == "json_fields" else FORMAT_EXACT)

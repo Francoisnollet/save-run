@@ -73,3 +73,15 @@ def test_current_model_must_be_one_of_the_tested_models():
     assert parse_config(base()).current_model is None
     with pytest.raises(ConfigError, match="current_model"):
         parse_config(base(current_model="autre"))
+
+
+def test_output_format_is_optional_and_stripped():
+    assert parse_config(base()).output_format is None
+    assert parse_config(base(output_format="  Réponds en JSON.  ")).output_format == "Réponds en JSON."
+
+
+def test_json_fields_without_output_format_warns_but_does_not_block():
+    c = parse_config(base(scoring="json_fields"))
+    assert len(c.warnings) == 1 and "output_format" in c.warnings[0] and "json_fields" in c.warnings[0]
+    assert not parse_config(base(scoring="json_fields", output_format='{"urgent": true ou false}')).warnings
+    assert not parse_config(base()).warnings                        # exact scoring: nothing to say

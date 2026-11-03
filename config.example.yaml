@@ -41,6 +41,9 @@ validation_part: 0.25
 max_calls: 2000
 max_tokens: 300        # plafond de tokens en sortie par appel (relevez-le pour le raisonnement ou le JSON long)
 scoring: exact            # exact | json_fields
+# Optionnel : comment le modèle doit répondre. Ajouté à CHAQUE variante générée, même sans exemple.
+# Recommandé avec json_fields : sans lui, un avertissement s'affiche (les variantes ne sauraient pas quel JSON produire).
+# output_format: 'Réponds avec le JSON brut uniquement, sans texte avant ou après : {"categorie": "..."}'
 # fields: [categorie]     # json_fields seulement ; par défaut, toutes les clés de `expected`
 # monthly_volume: 50000   # optionnel : appels par mois, pour chiffrer l'économie
 seed: 0                   # graine de la séparation des cas et des variantes

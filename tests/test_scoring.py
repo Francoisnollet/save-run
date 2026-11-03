@@ -86,3 +86,18 @@ def test_validate_expected_catches_problems_before_any_call():
         validate_expected(['{"a": 1}', "pas json"], "json_fields")
     with pytest.raises(ScoringError):
         validate_expected(['{"a": 1}'], "json_fields", ["b"])
+
+
+# --- replies written in the reasoning format (after an output_format) ----------------------------------
+
+@pytest.mark.parametrize("reply,expected_true", [
+    ('Le ton est pressant : échéance à 17h, donc {"urgent": true} est probable.\nRéponse : {"urgent": true}', True),
+    ('Pas de date, simple information.\nRéponse : {"urgent": false}', False),
+    ('Réflexion.\nRéponse : ```json\n{"urgent": false}\n```', False),
+    ('Réflexion.\nRéponse : {"urgent": true}\n', True),
+])
+def test_replies_in_the_reasoning_format_with_json_are_scored(reply, expected_true):
+    exp = '{"urgent": true}' if expected_true else '{"urgent": false}'
+    assert score_output(reply, exp, "json_fields", ["urgent"]).correct
+    other = '{"urgent": false}' if expected_true else '{"urgent": true}'
+    assert not score_output(reply, other, "json_fields", ["urgent"]).correct

@@ -31,6 +31,7 @@ class Config:
     models: list[ModelConfig]
     base_prompt: str | None = None
     role: str | None = None
+    output_format: str | None = None  # how the model must answer; added to every generated variant
     current_model: str | None = None  # model that runs the current prompt: the reference for the saving
     n_variants: int = 20
     runs_per_case: int = 1
@@ -121,6 +122,7 @@ def parse_config(data: object) -> Config:
         models=models,
         base_prompt=str(data["base_prompt"]).strip() or None if data.get("base_prompt") else None,
         role=str(data["role"]).strip() or None if data.get("role") else None,
+        output_format=str(data["output_format"]).strip() or None if data.get("output_format") else None,
         current_model=current,
         n_variants=_number(data, "n_variants", 20, 1, 100, integer=True),
         runs_per_case=_number(data, "runs_per_case", 1, 1, 20, integer=True),
@@ -137,6 +139,10 @@ def parse_config(data: object) -> Config:
     if cfg.runs_per_case > 1 and any(m.temperature == 0 for m in cfg.models):
         warnings.append("runs_per_case > 1 avec une température à 0 : les passages seront identiques, "
                         "ils ne coûtent que des appels. Laissez runs_per_case à 1.")
+    if cfg.scoring == "json_fields" and not cfg.output_format:
+        warnings.append("scoring: json_fields sans output_format : les variantes générées ne disent pas au modèle "
+                        "quel JSON produire (clés, valeurs possibles). Sans exemples elles échoueront presque sûrement, "
+                        "seul le prompt de référence BASE connaît le format. Ajoutez output_format dans la configuration.")
     return replace(cfg, warnings=warnings)
 
 
