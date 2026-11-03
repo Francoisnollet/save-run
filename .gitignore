@@ -23,3 +23,8 @@ dist/
 
 # Sorties de SAVE Run (dossier par défaut)
 saverun-out/
+
+# Données réelles (e-mails anonymisés) : ne jamais versionner
+data/
+private/
+emails.csv
