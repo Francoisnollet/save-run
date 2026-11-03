@@ -6,6 +6,7 @@ condensed instruction. Variant ids are stable: V01, V02... for a given config, c
 from __future__ import annotations
 
 import itertools
+import math
 import random
 from dataclasses import dataclass
 
@@ -78,15 +79,23 @@ def render(config: Config, examples: list[Case], persona: str, shots: int, reaso
 def build_variants(config: Config, examples: list[Case], n: int | None = None,
                    seed: int | None = None) -> tuple[list[Variant], list[str]]:
     """Return (variants, warnings). The plainest combination is always V01: it is the cheapest candidate
-    and must never be shuffled out. The others are drawn with the seed, so the draw is reproducible."""
+    and must never be shuffled out. The draw is balanced: at least half of the variants (V01 included) have no
+    reasoning, because reasoning costs output tokens and rarely wins on price. Reproducible with the seed."""
     n = config.n_variants if n is None else n
     seed = config.seed if seed is None else seed
     personas = ["aucun", "générique"] + (["métier"] if config.role else [])
     combos = list(itertools.product(personas, [0, N_SHOTS], [False, True], [False, True]))
     plain = ("aucun", 0, False, True)
-    rest = [c for c in combos if c != plain]
-    random.Random(seed).shuffle(rest)
-    chosen = ([plain] + rest)[:n]
+    direct = [c for c in combos if not c[2] and c != plain]     # no reasoning, V01 apart
+    reasoning = [c for c in combos if c[2]]
+    rnd = random.Random(seed)
+    rnd.shuffle(direct)
+    rnd.shuffle(reasoning)
+    take = min(n, len(combos))
+    n_direct = math.ceil(take / 2)                               # V01 counts among them
+    rest = direct[:n_direct - 1] + reasoning[:take - n_direct]
+    rnd.shuffle(rest)                                            # ids are not grouped by kind
+    chosen = [plain] + rest
 
     warnings = []
     if n > len(combos):

@@ -124,6 +124,28 @@ def test_reasoning_without_output_format_keeps_its_original_wording():
     assert all(v.system.endswith(REASONING) for v in variants if v.reasoning)
 
 
+@pytest.mark.parametrize("role", [None, "un agent expérimenté"])
+@pytest.mark.parametrize("seed", [0, 1, 7])
+def test_the_draw_is_balanced_at_every_size(role, seed):
+    config = cfg(role=role)
+    capacity = 24 if role else 16
+    for n in range(1, 31):
+        variants, _ = build_variants(config, EXAMPLES, n=n, seed=seed)
+        assert len(variants) == min(n, capacity) and len({v.system for v in variants}) == len(variants)
+        assert sum(not v.reasoning for v in variants) * 2 >= len(variants)          # at least half without reasoning
+        v1 = variants[0]
+        assert (v1.persona, v1.shots, v1.reasoning, v1.concise) == ("aucun", 0, False, True)
+        assert [v.id for v in variants] == [f"V{i:02d}" for i in range(1, len(variants) + 1)]
+
+
+def test_balanced_draw_is_reproducible_and_depends_on_the_seed():
+    a, _ = build_variants(cfg(), EXAMPLES, n=8, seed=3)
+    b, _ = build_variants(cfg(), EXAMPLES, n=8, seed=3)
+    c, _ = build_variants(cfg(), EXAMPLES, n=8, seed=4)
+    assert [v.system for v in a] == [v.system for v in b] and [v.system for v in a] != [v.system for v in c]
+    assert sum(not v.reasoning for v in a) == 4 == sum(v.reasoning for v in a)       # 8 variants: 4 and 4
+
+
 def test_examples_come_before_the_format_so_the_format_stays_last():
     variants, _ = build_variants(cfg(output_format=FORMAT), EXAMPLES, n=24)
     shots = [v for v in variants if v.shots == 3 and not v.reasoning]
