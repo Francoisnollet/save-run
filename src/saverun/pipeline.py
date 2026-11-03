@@ -13,7 +13,7 @@ from .config import Config
 from .cost import PriceTable, call_cost, estimate_tokens
 from .runner import (CallResult, Job, MaxCallsError, Preflight, RunStore, build_jobs, execute, preflight,
                      untested_models)
-from .scoring import validate_expected
+from .scoring import expected_label, validate_expected
 from .selection import (Economy, Row, Selection, Validation, build_rows, compute_economy, reachability, select,
                         validate, validation_pairs)
 from .splitting import Case, Split, split_cases
@@ -61,7 +61,8 @@ def prepare(config: Config, cases: list[Case], prices: PriceTable, store: RunSto
             dry_run: bool, case_warnings: list[str] | None = None) -> Plan:
     """Everything that can be decided and checked before the first call. Raises on any blocking problem."""
     validate_expected([c.expected for c in cases], config.scoring, config.fields)
-    split = split_cases(cases, config.validation_part, config.seed)
+    split = split_cases(cases, config.validation_part, config.seed,
+                        label=lambda c: expected_label(c.expected, config.scoring, config.fields))
     variants, variant_warnings = build_variants(config, split.examples)
     base = base_variant(config)
     all_variants = variants + ([base] if base else [])

@@ -8,7 +8,7 @@ import yaml
 
 from saverun.cli import main
 from saverun.config import load_config, parse_config
-from saverun.cost import load_prices
+from saverun.cost import PriceTable, load_prices
 from saverun.fake import FakeClient
 from saverun.pipeline import execute_plan, prepare
 from saverun.report import (FOOTER, SIMULATION_BANNER, economy_lines, render_report, validation_lines, verdict,
@@ -257,10 +257,27 @@ def test_readme_example_is_the_real_output_of_the_example_files(tmp_path):
     assert verdict_line in readme and SIMULATION_BANNER in readme
     rows = {(r["variant"], r["model"]): r for r in csv.DictReader((tmp_path / "out" / "results.csv").open(encoding="utf-8"))}
     for key in [("V01", "modele-exemple-compatible"), ("V05", "modele-exemple-compatible"),
-                ("V02", "modele-exemple-anthropic"), ("V11", "modele-exemple-anthropic"),
+                ("V08", "modele-exemple-anthropic"), ("V20", "modele-exemple-anthropic"),
                 ("BASE", "modele-exemple-anthropic")]:
         r = rows[key]
         cost = f"{float(r['cost_per_1000']):.3f}".replace(".", ",")
         assert f"| {cost}" in readme or f"{cost} \*" in readme, key
-    assert rows[("V11", "modele-exemple-anthropic")]["status"] == "retenue"
+    assert rows[("V08", "modele-exemple-anthropic")]["status"] == "retenue"
     assert rows[("BASE", "modele-exemple-anthropic")]["status"] == "seuil démontré, plus chère"
+
+
+def test_prepare_puts_both_values_in_every_few_shot_variant(tmp_path):
+    """urgent / not urgent: examples are balanced on the scored field, whatever the seed and the free-text field."""
+    from saverun.cost import ModelPrice
+    from saverun.splitting import Case
+    cases = [Case(f"C{i:03d}", f"mail {i}", json.dumps({"urgent": i % 5 == 0, "note": f"n{i}"})) for i in range(1, 41)]
+    model = {"id": "m", "provider": "anthropic", "api_key_env": "K", "rpm": 10}
+    prices = PriceTable("EUR", {"m": ModelPrice(1.0, 5.0, "d", "s")})
+    for seed in range(8):
+        config = parse_config({"intention": "x", "models": [model], "scoring": "json_fields", "fields": ["urgent"],
+                               "output_format": "Réponds en JSON.", "n_variants": 12, "seed": seed})
+        plan = prepare(config, cases, prices, RunStore(tmp_path / f"r{seed}"), dry_run=True)
+        assert {json.loads(c.expected)["urgent"] for c in plan.split.examples} == {True, False}
+        shots = [v for v in plan.variants if v.shots == 3]
+        assert shots and all('"urgent": true' in v.system and '"urgent": false' in v.system for v in shots)
+        assert not [w for w in plan.warnings if "valeurs attendues" in w]

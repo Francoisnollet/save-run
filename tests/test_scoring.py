@@ -88,7 +88,19 @@ def test_validate_expected_catches_problems_before_any_call():
         validate_expected(['{"a": 1}'], "json_fields", ["b"])
 
 
-# --- replies written in the reasoning format (after an output_format) ----------------------------------
+# --- expected_label, and replies written in the scoped reasoning format ------------------------------------------
+
+from saverun.scoring import expected_label
+
+
+def test_expected_label_is_what_scoring_compares():
+    assert expected_label("Facturation.", "exact") == expected_label(" facturation ", "exact")
+    assert expected_label("a", "exact") != expected_label("b", "exact")
+    one = expected_label('{"urgent": true, "note": "x"}', "json_fields", ["urgent"])
+    assert one == expected_label('{"note": "y", "urgent": true}', "json_fields", ["urgent"])
+    assert one != expected_label('{"urgent": false, "note": "x"}', "json_fields", ["urgent"])
+    assert expected_label('{"b": 1, "a": "Oui."}', "json_fields") == expected_label('{"a": "oui", "b": 1}', "json_fields")
+
 
 @pytest.mark.parametrize("reply,expected_true", [
     ('Le ton est pressant : échéance à 17h, donc {"urgent": true} est probable.\nRéponse : {"urgent": true}', True),

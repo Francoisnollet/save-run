@@ -12,19 +12,19 @@ Bonnes candidates : prompt fixe, volume élevé, sortie vérifiable automatiquem
 
 > **SIMULATION : faux modèle, résultats sans valeur.** Exemple **fictif**, généré avec `--dry-run` : aucun appel n'a été fait, les prix sont des valeurs d'exemple « À VÉRIFIER », et le faux modèle est réglé pour illustrer le raisonnement. Ces chiffres ne prouvent rien.
 
-**Verdict.** V11 sur modele-exemple-anthropic est la moins chère à démontrer 75 % de qualité (note 95 %, borne basse 76 %), pour 0,189 EUR les 1 000 appels, confirmée sur les cas de validation.
+**Verdict.** V08 sur modele-exemple-anthropic est la moins chère à démontrer 75 % de qualité (note 100 %, borne basse 84 %), pour 0,163 EUR les 1 000 appels, confirmée sur les cas de validation.
 
 | Variante | Modèle | Note | Intervalle 95 % | Coût / 1 000 appels (EUR) | Statut |
 |---|---|---|---|---|---|
 | V01 | modele-exemple-compatible | 25 % | 11 % – 47 % | 0,014 \* | sous le seuil |
 | V05 | modele-exemple-compatible | 65 % | 43 % – 82 % | 0,016 \* | sous le seuil |
-| V02 | modele-exemple-anthropic | 90 % | 70 % – 97 % | 0,173 | sous le seuil |
-| V11 | modele-exemple-anthropic | 95 % | 76 % – 99 % | 0,189 | **retenue** |
+| V08 | modele-exemple-anthropic | 100 % | 84 % – 100 % | 0,163 | **retenue** |
+| V20 | modele-exemple-anthropic | 90 % | 70 % – 97 % | 0,181 | sous le seuil |
 | BASE (prompt actuel) | modele-exemple-anthropic | 100 % | 84 % – 100 % | 0,269 | seuil démontré, plus chère |
 
 \* modèle gratuit valorisé à un tarif de référence : coût estimé. Extrait de 5 lignes sur 42.
 
-Lecture : V02 a une note brute de 90 %, mais sa borne basse (70 %) ne démontre pas le seuil de 75 % ; V11 le démontre, et c'est la moins chère à le faire. Le prompt actuel (`BASE`) le démontre aussi, mais coûte plus. Le rapport complet (`report.md`) détaille l'économie par rapport au prompt actuel, la validation et les réserves.
+Lecture : V20 a une note brute de 90 %, mais sa borne basse (70 %) ne démontre pas le seuil de 75 % ; V08 le démontre, et c'est la moins chère à le faire. Le prompt actuel (`BASE`) le démontre aussi, mais coûte plus. Le rapport complet (`report.md`) détaille l'économie par rapport au prompt actuel, la validation et les réserves.
 
 ## Installation
 

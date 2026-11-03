@@ -7,6 +7,7 @@ from __future__ import annotations
 import csv
 import random
 from dataclasses import dataclass, field
+from typing import Callable
 from pathlib import Path
 
 N_EXAMPLES = 3
@@ -64,20 +65,52 @@ def load_cases(path: str | Path) -> tuple[list[Case], list[str]]:
     return cases, warnings
 
 
+def _pick_examples(shuffled: list[Case], n: int, label: Callable[[Case], str],
+                   rnd: random.Random) -> tuple[list[Case], list[str]]:
+    """Few-shot examples with at least one case per distinct expected value, when n allows it.
+
+    Values are taken in order of first appearance in the shuffled cases, the remaining slots are filled with the
+    next shuffled cases, and the order of the examples is shuffled so it does not follow the values.
+    Returns (examples, warnings).
+    """
+    first: dict[str, Case] = {}
+    for c in shuffled:
+        first.setdefault(label(c), c)
+    picked = [first[v] for v in list(first)[:n]]
+    taken = {c.id for c in picked}
+    picked += [c for c in shuffled if c.id not in taken][:n - len(picked)]
+    rnd.shuffle(picked)
+    warnings = []
+    if len(first) > n:
+        missing = [v for v in list(first)[n:]]
+        shown = ", ".join(missing[:5]) + (" …" if len(missing) > 5 else "")
+        warnings.append(f"{len(first)} valeurs attendues distinctes pour {n} exemples few-shot seulement : "
+                        f"{len(missing)} valeur(s) ne figurent pas dans les exemples ({shown}).")
+    return picked, warnings
+
+
 def split_cases(cases: list[Case], validation_part: float, seed: int,
-                n_examples: int = N_EXAMPLES) -> Split:
-    """Partition the cases: few-shot examples first, then validation, the rest is the selection set."""
+                n_examples: int = N_EXAMPLES, label: Callable[[Case], str] | None = None) -> Split:
+    """Partition the cases: few-shot examples first, then validation, the rest is the selection set.
+
+    `label` gives the expected value a case asks for (default: its expected text, normalized); the examples
+    cover every distinct value when there are enough slots, and a warning says so when there are not.
+    """
     needed = n_examples + 2 * MIN_PER_SET
     if len(cases) < needed:
         raise CasesError(f"{len(cases)} cas : il en faut au moins {needed} pour séparer exemples, "
                          "sélection et validation (20 au minimum, 50 recommandés).")
+    label = label or (lambda c: c.expected.strip().casefold())
     shuffled = list(cases)
-    random.Random(seed).shuffle(shuffled)
-    examples, rest = shuffled[:n_examples], shuffled[n_examples:]
+    rnd = random.Random(seed)
+    rnd.shuffle(shuffled)
+    examples, example_warnings = _pick_examples(shuffled, n_examples, label, rnd)
+    chosen = {c.id for c in examples}
+    rest = [c for c in shuffled if c.id not in chosen]
     n_val = min(max(MIN_PER_SET, round(len(rest) * validation_part)), len(rest) - MIN_PER_SET)
     validation, selection = rest[:n_val], rest[n_val:]
 
-    warnings = []
+    warnings = list(example_warnings)
     if len(cases) < MIN_CASES:
         warnings.append(f"{len(cases)} cas seulement : le résultat est indicatif (visez 20 à 50 cas).")
     return Split(examples, selection, validation, warnings)

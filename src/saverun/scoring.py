@@ -96,6 +96,17 @@ def _expected_object(expected: str) -> dict:
     return obj
 
 
+def expected_label(expected: str, scoring: str, fields: list[str] | None = None) -> str:
+    """The value a case asks for, as a comparable string: exactly what scoring compares, nothing more.
+
+    With json_fields only the listed fields count, so a free-text field never makes every case look unique.
+    """
+    if scoring == "json_fields":
+        obj = _expected_object(expected)
+        return json.dumps({f: _norm(obj[f]) for f in (fields or list(obj))}, sort_keys=True, ensure_ascii=False)
+    return str(_norm(expected))
+
+
 def validate_expected(expecteds: list[str], scoring: str, fields: list[str] | None = None) -> None:
     """Check every expected value before any call is made, so a bad file never wastes money."""
     if scoring == "exact":
