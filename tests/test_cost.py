@@ -88,3 +88,33 @@ def test_example_prices_cover_example_config_and_are_marked():
     assert t.currency == "EUR"
     assert all(p.unverified for p in t.models.values())  # shipped values are examples only
     assert t.get("modele-exemple-compatible").free
+
+
+# --- rates left at « À VÉRIFIER »: the model is known, but any run using it is blocked ---------------------
+
+def test_placeholder_rates_block_a_run_without_inventing_a_price(tmp_path):
+    placeholder = {"input_per_million": "À VÉRIFIER", "output_per_million": "À VÉRIFIER",
+                   "date": "À VÉRIFIER", "source": "À VÉRIFIER"}
+    t = load_prices(write(tmp_path, {"currency": "EUR", "models": {"ok": entry(), "nouveau": placeholder}}))
+    assert t.get("nouveau") is None and "nouveau" in t.unset and "ok" in t.models
+    t.require(["ok"])                                          # the other models are unaffected
+    with pytest.raises(MissingPriceError) as e:
+        t.require(["ok", "nouveau", "absent"])
+    msg = str(e.value)
+    assert "nouveau" in msg and "absent" in msg and "non renseignés" in msg and "inventé" in msg
+    assert set(e.value.models) == {"nouveau", "absent"}
+
+
+def test_only_one_rate_left_as_placeholder_is_an_error(tmp_path):
+    half = entry(output_per_million="À VÉRIFIER")
+    with pytest.raises(PriceError, match="les deux tarifs"):
+        load_prices(write(tmp_path, {"currency": "EUR", "models": {"a": half}}))
+    junk = entry(input_per_million="cher", output_per_million="cher")
+    with pytest.raises(PriceError):
+        load_prices(write(tmp_path, {"currency": "EUR", "models": {"a": junk}}))
+
+
+def test_shipped_prices_leave_the_first_real_test_models_unset():
+    t = load_prices("prices.yaml")
+    assert {"claude-sonnet-4-5-20250929", "claude-haiku-5-5"} <= t.unset
+    assert not {"claude-sonnet-4-5-20250929", "claude-haiku-5-5"} & set(t.models)   # no value was invented

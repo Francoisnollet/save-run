@@ -17,10 +17,17 @@ class PriceError(ValueError):
 class MissingPriceError(PriceError):
     """One or more models have no price. Never valued at zero."""
 
-    def __init__(self, models: list[str], path: str | Path):
-        self.models = models
-        super().__init__(f"Modèle(s) absent(s) de {path} : {', '.join(models)}. "
+    def __init__(self, models: list[str], path: str | Path, unset: list[str] | None = None):
+        self.models = models + (unset or [])
+        parts = []
+        if models:
+            parts.append(f"Modèle(s) absent(s) de {path} : {', '.join(models)}. "
                          "Ajoutez leur prix (avec date et source) : aucun n'est valorisé à zéro.")
+        if unset:
+            parts.append(f"Prix non renseignés (« {UNVERIFIED_MARK} ») dans {path} pour : {', '.join(unset)}. "
+                         "Remplissez input_per_million et output_per_million depuis la page officielle du "
+                         "fournisseur, avec la date et la source : aucun prix n'est inventé ni valorisé à zéro.")
+        super().__init__(" ".join(parts))
 
 
 @dataclass(frozen=True)
@@ -41,15 +48,17 @@ class PriceTable:
     currency: str
     models: dict[str, ModelPrice]
     path: str = "prices.yaml"
+    unset: frozenset[str] = frozenset()  # listed, but rates still « À VÉRIFIER »: they block any run using them
 
     def get(self, model_id: str) -> ModelPrice | None:
         return self.models.get(model_id)
 
     def require(self, model_ids: list[str]) -> None:
-        """Raise MissingPriceError listing every model without a price."""
-        missing = [m for m in model_ids if m not in self.models]
-        if missing:
-            raise MissingPriceError(missing, self.path)
+        """Raise MissingPriceError listing every model without a usable price (absent or not yet filled in)."""
+        missing = [m for m in model_ids if m not in self.models and m not in self.unset]
+        unset = [m for m in model_ids if m in self.unset]
+        if missing or unset:
+            raise MissingPriceError(missing, self.path, unset)
 
     def warnings(self, model_ids: list[str]) -> list[str]:
         """Notices for the models actually used: unverified prices and reference tariffs."""
@@ -65,13 +74,20 @@ class PriceTable:
         return out
 
 
-def _price(model_id: str, raw: object) -> ModelPrice:
+def _price(model_id: str, raw: object) -> ModelPrice | None:
+    """The model's price, or None when both rates are still the placeholder « À VÉRIFIER »."""
     where = f"prices.yaml, modèle {model_id}"
     if not isinstance(raw, dict):
         raise PriceError(f"{where} : doit être un dictionnaire.")
+    placeholders = [str(raw.get(k, "")).strip() == UNVERIFIED_MARK for k in ("input_per_million", "output_per_million")]
+    if any(placeholders) and not all(placeholders):
+        raise PriceError(f"{where} : renseignez les deux tarifs, ou laissez les deux à « {UNVERIFIED_MARK} ».")
     rates = []
     for key in ("input_per_million", "output_per_million"):
         v = raw.get(key)
+        if all(placeholders):
+            rates.append(0.0)  # never used: the model goes to PriceTable.unset
+            continue
         if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
             raise PriceError(f"{where} : {key} doit être un nombre positif ou nul "
                              "(pour un modèle gratuit, saisissez un tarif de référence).")
@@ -82,6 +98,8 @@ def _price(model_id: str, raw: object) -> ModelPrice:
     free = raw.get("free", False)
     if not isinstance(free, bool):
         raise PriceError(f"{where} : free doit valoir true ou false.")
+    if all(placeholders):
+        return None
     return ModelPrice(rates[0], rates[1], str(raw["date"]).strip(), str(raw["source"]).strip(), free)
 
 
@@ -98,7 +116,9 @@ def load_prices(path: str | Path) -> PriceTable:
     currency = str(data.get("currency") or "").strip()
     if not currency:
         raise PriceError(f"{p} : « currency » est obligatoire (aucune conversion de monnaie n'est faite).")
-    return PriceTable(currency, {str(k): _price(str(k), v) for k, v in data["models"].items()}, str(p))
+    parsed = {str(k): _price(str(k), v) for k, v in data["models"].items()}
+    return PriceTable(currency, {k: v for k, v in parsed.items() if v is not None}, str(p),
+                      frozenset(k for k, v in parsed.items() if v is None))
 
 
 # --- Costs ------------------------------------------------------------------------

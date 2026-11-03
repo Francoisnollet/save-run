@@ -23,6 +23,20 @@ models:
     date: "À VÉRIFIER"
     source: "À VÉRIFIER"
 
+  # Modèles du premier vrai test. Tarifs volontairement NON renseignés : à remplir depuis la page de prix
+  # officielle du fournisseur (tarifs d'entrée et de sortie par million de tokens, date du relevé, URL).
+  # Tant que les tarifs sont « À VÉRIFIER », tout lancement qui utilise ces modèles est bloqué.
+  claude-sonnet-4-5-20250929:
+    input_per_million: "À VÉRIFIER"
+    output_per_million: "À VÉRIFIER"
+    date: "À VÉRIFIER"
+    source: "À VÉRIFIER"
+  claude-haiku-5-5:
+    input_per_million: "À VÉRIFIER"
+    output_per_million: "À VÉRIFIER"
+    date: "À VÉRIFIER"
+    source: "À VÉRIFIER"
+
   # Modèles fictifs de l'export d'exemple du diagnostic (prototypes/calls.example.csv)
   modele_A:
     input_per_million: 0.20     # À VÉRIFIER
