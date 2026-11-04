@@ -18,8 +18,8 @@ from saverun.report import (FOOTER, SIMULATION_BANNER, economy_lines, print_summ
 from saverun.runner import ModelRuntime, RunStore
 from saverun.scoring import variant_score
 from saverun.selection import (NOT_SEPARATED_ALL, PLUS_CHERE, RETENUE, Row, Selection, Validation, compute_economy,
-                               select)
-from saverun.splitting import load_cases
+                               select, tag_scores)
+from saverun.splitting import UNTAGGED, load_cases
 
 SECRET = "sk-SECRET-0123456789"
 
@@ -232,6 +232,64 @@ def test_terminal_gives_the_legend_and_points_to_the_report(tmp_path):
     text = console.export_text()
     assert "modele-exemple-anthropic = fournisseur/modele-exemple-anthropic" in text
     assert "Détail complet" in text and "report.md" in text
+
+
+def tagged_outcome(tmp_path, tags=lambda i: f"F{i % 2}"):
+    """A dry run on the example cases, with a tag column added to the cases file."""
+    with open("cases.example.csv", encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
+    path = tmp_path / "tagged.csv"
+    with path.open("w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["input", "expected", "tag"])
+        w.writerows((r["input"], r["expected"], tags(i)) for i, r in enumerate(rows))
+    cfg = load_config("config.example.yaml")
+    cases, warnings = load_cases(path)
+    store = RunStore(tmp_path / "runs")
+    plan = prepare(cfg, cases, load_prices("prices.yaml"), store, dry_run=True, case_warnings=warnings)
+    runtimes = {m.id: ModelRuntime(FakeClient(m.id, {c.input: c.expected for c in cases}, seed=0), None)
+                for m in cfg.models}
+    return execute_plan(plan, runtimes, store)
+
+
+def test_report_shows_the_score_per_tag_and_it_adds_up_to_the_row(tmp_path):
+    o = tagged_outcome(tmp_path)
+    report = render_report(o)
+    assert "## Note par tag" in report and "| Variante | Modèle | F0 | F1 |" in report
+    tags, table = tag_scores(o.selection_results, o.plan.split.selection, o.plan.config)
+    assert tags == ["F0", "F1"]
+    for r in o.rows:
+        cells = table[(r.model, r.variant)]
+        assert sum(n for _, n in cells.values()) == r.n_cases
+        assert sum(k for k, _ in cells.values()) / r.n_cases == pytest.approx(r.score)
+
+
+def test_report_has_no_tag_section_without_tags(tmp_path):
+    main(example_args(tmp_path, "--dry-run"))
+    assert "Note par tag" not in (tmp_path / "out" / "report.md").read_text(encoding="utf-8")
+
+
+def test_untagged_cases_are_a_group_of_their_own_listed_last(tmp_path):
+    o = tagged_outcome(tmp_path, tags=lambda i: "" if i % 2 else "F0")
+    assert tag_scores(o.selection_results, o.plan.split.selection, o.plan.config)[0] == ["F0", UNTAGGED]
+    assert any(UNTAGGED in w for w in o.plan.warnings)
+
+
+def test_tags_change_neither_the_calls_nor_the_selection(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    o = tagged_outcome(tmp_path / "a", tags=lambda i: f"F{i % 2}")
+    plain = tagged_outcome(tmp_path / "b", tags=lambda i: "")
+    assert [j.key for j in o.plan.jobs] == [j.key for j in plain.plan.jobs]
+    assert [(r.model, r.variant, r.score, r.status) for r in o.rows] == [(r.model, r.variant, r.score, r.status)
+                                                                         for r in plain.rows]
+    assert verdict(o) == verdict(plain)
+
+
+def test_a_tag_with_too_few_selection_cases_is_flagged(tmp_path):
+    o = tagged_outcome(tmp_path, tags=lambda i: f"T{i}")           # one case per tag
+    tag = o.plan.split.selection[0].tag
+    assert f"{tag} (1)" in render_report(o)
 
 
 def test_cli_without_command_prints_help(capsys):

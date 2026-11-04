@@ -11,6 +11,7 @@ from .config import Config
 from .cost import PriceTable, Savings, cost_per_1000, savings
 from .runner import MAX_FAILED_SHARE, CallResult, untested_models
 from .scoring import case_rates, max_lower_bound, score_output, variant_score
+from .splitting import UNTAGGED, Case
 from .variants import BASE_ID
 
 NEAR_TIE_MARGIN = 0.10      # within 10 % of the winner's cost
@@ -212,6 +213,30 @@ def not_separated(rows: list[Row], variants, threshold: float) -> list[str]:
                 and max(direct) - min(direct) <= max(SMALL_GAP, 1 / n) + EPS):
             found.setdefault(NOT_SEPARATED_DIRECT, []).append(model)
     return [f"{', '.join(models)} : {message}" for message, models in found.items()]
+
+
+# --- Score per tag (informative: selection never looks at it) ------------------------
+
+def tag_scores(results: list[CallResult], cases: list[Case],
+               config: Config) -> tuple[list[str], dict[tuple[str, str], dict[str, tuple[float, int]]]]:
+    """(tags, (model, variant) -> tag -> (successes, cases)). No tag at all in the cases: nothing to show."""
+    tag_of = {c.id: c.tag or UNTAGGED for c in cases}
+    if not any(c.tag for c in cases):
+        return [], {}
+    expected = {c.id: c.expected for c in cases}
+    tags = sorted(set(tag_of.values()) - {UNTAGGED}) + ([UNTAGGED] if UNTAGGED in tag_of.values() else [])
+    groups: dict[tuple[str, str], list[CallResult]] = {}
+    for r in results:
+        if r.case in tag_of:
+            groups.setdefault((r.model, r.variant), []).append(r)
+    table = {}
+    for couple, group in groups.items():
+        cells: dict[str, tuple[float, int]] = {}
+        for case, rate in case_rates(group, expected, config.scoring, config.fields).items():
+            k, n = cells.get(tag_of[case], (0.0, 0))
+            cells[tag_of[case]] = (k + rate, n + 1)
+        table[couple] = cells
+    return tags, table
 
 
 # --- Validation --------------------------------------------------------------------

@@ -17,7 +17,8 @@ from rich.table import Table
 
 from .pipeline import RunOutcome
 from .runner import MAX_FAILED_SHARE
-from .selection import NON_TESTE, PLUS_CHERE, RETENUE, Row, not_separated, winner_confirmed
+from .scoring import wilson
+from .selection import NON_TESTE, PLUS_CHERE, RETENUE, Row, not_separated, tag_scores, winner_confirmed
 
 SIMULATION_BANNER = "SIMULATION : faux modèle, résultats sans valeur"
 FOOTER = "Généré avec SAVE Run (https://allrun.be)"
@@ -237,6 +238,27 @@ def _md_table(o: RunOutcome) -> list[str]:
     return out
 
 
+def _tag_section(o: RunOutcome) -> list[str]:
+    tags, table = tag_scores(o.selection_results, o.plan.split.selection, o.plan.config)
+    if not tags:
+        return []
+    out = ["", "## Note par tag", "", "Cas de sélection uniquement. Chaque cellule : réussites/total : note (intervalle "
+           "de Wilson à 95 %). Cette ventilation est informative : elle ne change ni la sélection ni le verdict.", "",
+           "| Variante | Modèle | " + " | ".join(t.replace("|", "\\|") for t in tags) + " |",
+           "|---|---|" + "---|" * len(tags)]
+    for r in o.rows:
+        cells = table.get((r.model, r.variant), {})
+        out.append(f"| {r.variant} | {r.model} | " + " | ".join(_tag_cell(*cells.get(t, (0, 0))) for t in tags) + " |")
+    return out
+
+
+def _tag_cell(k: float, n: int) -> str:
+    if not n:
+        return "—"
+    lo, hi = wilson(k, n)
+    return f"{k:g}/{n} : {pct(k / n)} ({pct(lo)} – {pct(hi)})"
+
+
 def render_report(o: RunOutcome, footer: bool = True) -> str:
     cfg, split = o.plan.config, o.plan.split
     L: list[str] = ["# Rapport SAVE Run", ""]
@@ -252,6 +274,7 @@ def render_report(o: RunOutcome, footer: bool = True) -> str:
     L += ["", "## Résultats", "", f"Seuil de qualité : {pct(cfg.seuil_qualite)} sur la borne basse de l'intervalle "
           "de Wilson à 95 %. Lignes triées par coût.", ""]
     L += _md_table(o)
+    L += _tag_section(o)
     L += ["", "## Conditions et réserves", ""]
     L += [f"- Cas : {len(split.examples) + len(split.selection) + len(split.validation)} au total "
           f"({len(split.examples)} exemples few-shot, {len(split.selection)} de sélection, "
@@ -339,7 +362,8 @@ def print_summary(o: RunOutcome, console: Console) -> None:
     legend = [f"{s} = {m}" for m, s in short_model_names([r.model for r in o.rows]).items() if s != m]
     if legend:
         console.print("Modèles : " + " ; ".join(legend), highlight=False)
-    console.print("Détail complet (leviers, tokens, cas, échecs) dans report.md.", highlight=False)
+    tagged = ", notes par tag" if any(c.tag for c in o.plan.split.selection) else ""
+    console.print(f"Détail complet (leviers, tokens, cas, échecs{tagged}) dans report.md.", highlight=False)
     console.print(f"\n[bold]Verdict[/] : {verdict(o)}", highlight=False)
     for line in separation_lines(o):
         console.print(f"  ! {line}", highlight=False)

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Convertit un fichier à deux colonnes (texte de l'e-mail, urgent oui/non) en cases.csv pour SAVE Run.
+"""Convertit un fichier à deux ou trois colonnes (texte de l'e-mail, urgent oui/non, tag) en cases.csv pour SAVE Run.
 
     python tools/make_cases.py data/emails.csv -o cases.csv
 
-Entrée : une ligne par e-mail, deux colonnes : le texte, puis oui ou non. Une ligne d'en-tête est détectée toute
-seule. Le séparateur (virgule, point-virgule ou tabulation) est détecté ; un texte qui contient le séparateur ou
+Entrée : une ligne par e-mail : le texte, puis oui ou non, puis un tag facultatif (par exemple une famille de cas),
+qui peut rester vide. Une ligne d'en-tête est détectée toute seule. Le séparateur (virgule, point-virgule ou tabulation) est détecté ; un texte qui contient le séparateur ou
 des retours à la ligne doit être entre guillemets, comme tout export CSV de tableur.
-Sortie : colonnes `input,expected`, avec expected = {"urgent": true} ou {"urgent": false} correctement échappé.
+Sortie : colonnes `input,expected`, avec expected = {"urgent": true} ou {"urgent": false} correctement échappé,
+plus une colonne `tag` si au moins une ligne en a un.
 
 Utilitaire autonome (bibliothèque standard seulement), hors du paquet saverun. Il ne contacte aucun service.
 Gardez vos fichiers d'e-mails réels dans data/ ou private/ : ils sont ignorés par git.
@@ -24,6 +25,7 @@ from pathlib import Path
 YES = {"oui", "o", "yes", "y", "true", "vrai", "1"}
 NO = {"non", "n", "no", "false", "faux", "0"}
 DELIMITERS = ",;\t"
+HINT = " (le texte contient-il le séparateur sans guillemets ?)"
 
 
 def parse_label(cell: str) -> bool | None:
@@ -39,7 +41,7 @@ def detect_delimiter(sample: str) -> str:
 
 
 def convert(path: Path, field: str = "urgent", delimiter: str | None = None):
-    """Return (cases, errors, warnings): cases is a list of (text, expected_json, label)."""
+    """Return (cases, errors, warnings): cases is a list of (text, expected_json, label, tag)."""
     raw = path.read_text(encoding="utf-8-sig")
     delim = delimiter or detect_delimiter(raw)
     cases, errors, warnings, seen = [], [], [], Counter()
@@ -47,30 +49,31 @@ def convert(path: Path, field: str = "urgent", delimiter: str | None = None):
     for number, row in enumerate(reader, start=1):
         if not any(cell.strip() for cell in row):
             continue
-        if number == 1 and len(row) >= 2 and parse_label(row[-1]) is None:
+        if number == 1 and len(row) >= 2 and parse_label(row[1]) is None and parse_label(row[-1]) is None:
             continue  # header line
-        if len(row) != 2:
-            hint = " (le texte contient-il le séparateur sans guillemets ?)" if len(row) > 2 else ""
-            errors.append(f"ligne {number} : {len(row)} colonne(s) au lieu de 2{hint}.")
+        if len(row) not in (2, 3):
+            hint = HINT if len(row) > 3 else ""
+            errors.append(f"ligne {number} : {len(row)} colonne(s) au lieu de 2 ou 3{hint}.")
             continue
-        text, label = row[0].strip(), parse_label(row[1])
+        text, label, tag = row[0].strip(), parse_label(row[1]), row[2].strip() if len(row) == 3 else ""
         if not text:
             errors.append(f"ligne {number} : texte vide.")
         elif label is None:
-            errors.append(f"ligne {number} : « {row[1].strip()[:20]} » n'est ni oui ni non.")
+            hint = HINT if len(row) == 3 else ""
+            errors.append(f"ligne {number} : « {row[1].strip()[:20]} » n'est ni oui ni non{hint}.")
         else:
             seen[text] += 1
-            cases.append((text, json.dumps({field: label}, ensure_ascii=False), label))
+            cases.append((text, json.dumps({field: label}, ensure_ascii=False), label, tag))
     duplicates = sum(n - 1 for n in seen.values())
     if duplicates:
         warnings.append(f"{duplicates} e-mail(s) en double : SAVE Run ne gardera que le premier de chaque.")
     return cases, errors, warnings
 
 
-def balance_warnings(cases: list[tuple[str, str, bool]]) -> list[str]:
+def balance_warnings(cases: list[tuple[str, str, bool, str]]) -> list[str]:
     out = []
     n = len(cases)
-    positives = sum(label for _, _, label in cases)
+    positives = sum(case[2] for case in cases)
     if n < 20:
         out.append(f"{n} cas seulement : SAVE Run avertira que le résultat est indicatif (visez 50).")
     if n and min(positives, n - positives) < max(5, round(0.1 * n)):
@@ -80,8 +83,8 @@ def balance_warnings(cases: list[tuple[str, str, bool]]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Fichier à deux colonnes (texte, oui/non) -> cases.csv pour SAVE Run.")
-    ap.add_argument("input", type=Path, help="fichier à deux colonnes : texte de l'e-mail, urgent oui/non")
+    ap = argparse.ArgumentParser(description="Fichier à deux ou trois colonnes (texte, oui/non, tag) -> cases.csv pour SAVE Run.")
+    ap.add_argument("input", type=Path, help="colonnes : texte de l'e-mail, urgent oui/non, tag (facultatif)")
     ap.add_argument("-o", "--output", type=Path, default=Path("cases.csv"), help="défaut : cases.csv")
     ap.add_argument("--field", default="urgent", help="nom du champ JSON (défaut : urgent)")
     ap.add_argument("--delimiter", choices=list(DELIMITERS), help="séparateur (détecté par défaut)")
@@ -111,9 +114,10 @@ def main(argv: list[str] | None = None) -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["input", "expected"])
-        w.writerows((text, expected) for text, expected, _ in cases)
-    yes = sum(label for _, _, label in cases)
+        tagged = any(case[3] for case in cases)
+        w.writerow(["input", "expected", *(["tag"] if tagged else [])])
+        w.writerows((text, expected, *([tag] if tagged else [])) for text, expected, _, tag in cases)
+    yes = sum(case[2] for case in cases)
     print(f"{len(cases)} cas écrits dans {args.output} ({yes} oui, {len(cases) - yes} non).")
     for w_ in [*warnings, *balance_warnings(cases)]:
         print(f"! {w_}")

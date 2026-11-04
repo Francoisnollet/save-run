@@ -13,6 +13,10 @@ from pathlib import Path
 N_EXAMPLES = 3
 MIN_CASES = 20          # below this, results are only indicative
 MIN_PER_SET = 2
+MIN_CASES_PER_TAG = 10  # fewer selection cases than this under a tag: its score says very little
+
+
+UNTAGGED = "(sans tag)"
 
 
 class CasesError(ValueError):
@@ -24,6 +28,7 @@ class Case:
     id: str        # stable reference (row number in the file), used in runs/
     input: str
     expected: str
+    tag: str = ""  # optional group, for the "Note par tag" section only: never sent, never used to split or to select
 
 
 @dataclass(frozen=True)
@@ -35,7 +40,7 @@ class Split:
 
 
 def load_cases(path: str | Path) -> tuple[list[Case], list[str]]:
-    """Read cases.csv (columns input, expected). Exact duplicate inputs are dropped with a warning."""
+    """Read cases.csv (columns input, expected, optional tag). Exact duplicate inputs are dropped with a warning."""
     p = Path(path)
     if not p.is_file():
         raise CasesError(f"Fichier de cas introuvable : {p}")
@@ -44,9 +49,9 @@ def load_cases(path: str | Path) -> tuple[list[Case], list[str]]:
         if not reader.fieldnames or not {"input", "expected"} <= set(reader.fieldnames):
             raise CasesError("cases.csv doit avoir les colonnes « input » et « expected ».")
         rows = list(reader)
-    cases, seen, warnings, dropped = [], {}, [], 0
+    cases, seen, seen_tags, warnings, dropped = [], {}, {}, [], 0
     for i, r in enumerate(rows, start=2):  # line 1 is the header
-        inp, exp = (r["input"] or "").strip(), (r["expected"] or "").strip()
+        inp, exp, tag = (r["input"] or "").strip(), (r["expected"] or "").strip(), (r.get("tag") or "").strip()
         if not inp and not exp:
             continue
         if not inp or not exp:
@@ -56,13 +61,32 @@ def load_cases(path: str | Path) -> tuple[list[Case], list[str]]:
             if seen[inp] != exp:
                 warnings.append(f"Ligne {i} : même input que la ligne précédente avec un autre « expected » "
                                 "(ignorée) ; vérifiez vos données.")
+            elif seen_tags[inp] != tag:
+                warnings.append(f"Ligne {i} : même input que la ligne précédente avec un autre tag (ignorée) ; "
+                                "vérifiez vos données.")
             continue
-        seen[inp] = exp
-        cases.append(Case(id=f"C{i - 1:03d}", input=inp, expected=exp))
+        seen[inp], seen_tags[inp] = exp, tag
+        cases.append(Case(id=f"C{i - 1:03d}", input=inp, expected=exp, tag=tag))
     if dropped:
         warnings.append(f"{dropped} cas en double (même input) ignoré(s) : un cas ne doit jamais "
                         "se retrouver dans deux ensembles.")
+    untagged = sum(not c.tag for c in cases)
+    if 0 < untagged < len(cases):
+        warnings.append(f"{untagged} cas sans tag : ils sont regroupés sous « {UNTAGGED} » dans la note par tag.")
     return cases, warnings
+
+
+def tag_warnings(selection: list[Case]) -> list[str]:
+    """Tags with too few selection cases. The draw does not balance tags: this is where it shows."""
+    counts: dict[str, int] = {}
+    for c in selection:
+        if c.tag:
+            counts[c.tag] = counts.get(c.tag, 0) + 1
+    few = [f"{tag} ({n})" for tag, n in sorted(counts.items()) if n < MIN_CASES_PER_TAG]
+    if not few:
+        return []
+    return [f"Moins de {MIN_CASES_PER_TAG} cas de sélection pour ce(s) tag(s) : {', '.join(few)}. Leur note par tag "
+            "n'est qu'indicative."]
 
 
 def _pick_examples(shuffled: list[Case], n: int, label: Callable[[Case], str],

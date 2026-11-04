@@ -1,6 +1,6 @@
 import pytest
 
-from saverun.splitting import CasesError, Case, load_cases, split_cases
+from saverun.splitting import MIN_CASES_PER_TAG, UNTAGGED, CasesError, Case, load_cases, split_cases, tag_warnings
 
 
 def make(n):
@@ -114,3 +114,48 @@ def test_json_fields_values_ignore_fields_that_are_not_scored():
     assert {json.loads(c.expected)["urgent"] for c in s.examples} == {True, False}
     assert not any("valeurs attendues" in w for w in s.warnings)
     assert any("40 valeurs attendues distinctes" in w for w in split_cases(cases, 0.25, 3).warnings)
+
+
+# --- optional tag column --------------------------------------------------------------------------
+
+def write_tagged(tmp_path, rows, header="input,expected,tag"):
+    path = tmp_path / "cases.csv"
+    path.write_text(header + "\n" + "\n".join(rows) + "\n", encoding="utf-8")
+    return path
+
+
+def test_two_column_files_have_no_tag_and_no_warning(tmp_path):
+    cases, warnings = load_cases(write_tagged(tmp_path, ["a,oui", "b,non"], header="input,expected"))
+    assert [c.tag for c in cases] == ["", ""] and not warnings
+
+
+def test_tag_is_read_and_untagged_cases_are_flagged(tmp_path):
+    cases, warnings = load_cases(write_tagged(tmp_path, ["a,oui,F1", "b,non,"]))
+    assert [c.tag for c in cases] == ["F1", ""]
+    assert any("1 cas sans tag" in w and UNTAGGED in w for w in warnings)
+
+
+def test_all_cases_tagged_gives_no_warning(tmp_path):
+    assert load_cases(write_tagged(tmp_path, ["a,oui,F1", "b,non,F2"]))[1] == []
+
+
+def test_same_input_with_another_tag_is_flagged(tmp_path):
+    cases, warnings = load_cases(write_tagged(tmp_path, ["a,oui,F1", "a,oui,F2"]))
+    assert len(cases) == 1 and any("autre tag" in w for w in warnings)
+
+
+def test_tag_does_not_change_the_split():
+    plain = [Case(f"C{i:03d}", f"e{i}", "oui" if i % 2 else "non") for i in range(40)]
+    tagged = [Case(c.id, c.input, c.expected, tag=f"F{i % 3}") for i, c in enumerate(plain)]
+    a, b = split_cases(plain, 0.25, 0), split_cases(tagged, 0.25, 0)
+    for part in ("examples", "selection", "validation"):
+        assert [c.id for c in getattr(a, part)] == [c.id for c in getattr(b, part)]
+
+
+def test_warning_when_a_tag_has_too_few_selection_cases():
+    enough = [Case(f"A{i}", f"a{i}", "x", tag="A") for i in range(MIN_CASES_PER_TAG)]
+    few = [Case(f"B{i}", f"b{i}", "x", tag="B") for i in range(MIN_CASES_PER_TAG - 1)]
+    untagged = [Case(f"C{i}", f"c{i}", "x") for i in range(2)]
+    warnings = tag_warnings(enough + few + untagged)
+    assert len(warnings) == 1 and f"B ({MIN_CASES_PER_TAG - 1})" in warnings[0] and "A (" not in warnings[0]
+    assert tag_warnings(enough) == []

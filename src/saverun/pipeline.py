@@ -16,7 +16,7 @@ from .runner import (CallResult, Job, MaxCallsError, Preflight, RunStore, build_
 from .scoring import expected_label, validate_expected
 from .selection import (Economy, Row, Selection, Validation, build_rows, compute_economy, reachability, select,
                         validate, validation_pairs)
-from .splitting import Case, Split, split_cases
+from .splitting import Case, Split, split_cases, tag_warnings
 from .variants import Variant, base_variant, build_variants
 
 
@@ -82,7 +82,8 @@ def prepare(config: Config, cases: list[Case], prices: PriceTable, store: RunSto
     return Plan(config=config, split=split, variants=variants, base=base, prices=prices, jobs=jobs, preflight=pf,
                 validation_calls_per_candidate=val_calls, validation_cost_ceiling=ceiling,
                 reachability=reachability(len(split.selection), config.seuil_qualite),
-                warnings=[*(case_warnings or []), *split.warnings, *config.warnings, *variant_warnings,
+                warnings=[*(case_warnings or []), *split.warnings, *tag_warnings(split.selection), *config.warnings,
+                          *variant_warnings,
                           *pf.warnings],
                 dry_run=dry_run)
 

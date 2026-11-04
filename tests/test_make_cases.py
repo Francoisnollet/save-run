@@ -56,7 +56,8 @@ def test_custom_field_name(tmp_path):
 @pytest.mark.parametrize("content,fragment", [
     ("a,oui\nb,peut-être\n", "ligne 2"),
     ("a,oui\n,non\n", "texte vide"),
-    ("Bonjour, ceci n'est pas entre guillemets,oui\n", "3 colonne(s)"),
+    ("Bonjour, ceci n'est pas entre guillemets,oui\n", "sans guillemets"),
+    ("a,b,c,oui\n", "4 colonne(s)"),
     ("seul\n", "1 colonne(s)"),
 ])
 def test_bad_rows_are_reported_with_their_line(tmp_path, content, fragment):
@@ -85,3 +86,32 @@ def test_the_shipped_example_converts_and_is_not_ignored_by_git():
     cases, errors, warnings = make_cases.convert(Path("tools/emails.example.csv"))
     assert not errors and not warnings and len(cases) == 30
     assert sum(c[2] for c in cases) == 13
+
+
+# --- optional tag column --------------------------------------------------------------------------
+
+def test_tag_column_goes_through_with_its_header(tmp_path):
+    src = write(tmp_path, "texte,urgent,famille\n\"a, b\",oui,F1\nc,non,\nd,non,F2\n")
+    out = tmp_path / "cases.csv"
+    assert make_cases.main([str(src), "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8").splitlines()[0] == "input,expected,tag"
+    cases, warnings = load_cases(out)
+    assert [(c.input, c.tag) for c in cases] == [("a, b", "F1"), ("c", ""), ("d", "F2")]
+    assert any("1 cas sans tag" in w for w in warnings)
+
+
+def test_three_columns_without_header_are_read_as_data(tmp_path):
+    (case, *_), errors, _ = make_cases.convert(write(tmp_path, "a,oui,F1\nb,non,F2\n"))
+    assert not errors and case[3] == "F1"
+
+
+def test_two_columns_stay_two_columns(tmp_path):
+    out = tmp_path / "cases.csv"
+    assert make_cases.main([str(write(tmp_path, "texte,urgent\na,oui\nb,non\n")), "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8").splitlines()[0] == "input,expected"
+
+
+def test_an_empty_tag_column_is_not_written(tmp_path):
+    out = tmp_path / "cases.csv"
+    assert make_cases.main([str(write(tmp_path, "a,oui,\nb,non,\n")), "-o", str(out)]) == 0
+    assert out.read_text(encoding="utf-8").splitlines()[0] == "input,expected"
