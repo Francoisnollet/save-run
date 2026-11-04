@@ -7,14 +7,17 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+from collections import Counter
 from pathlib import Path
 
+from rich import box
 from rich.console import Console
 from rich.table import Table
 
 from .pipeline import RunOutcome
 from .runner import MAX_FAILED_SHARE
-from .selection import NON_TESTE, RETENUE, Row, not_separated, winner_confirmed
+from .selection import NON_TESTE, PLUS_CHERE, RETENUE, Row, not_separated, winner_confirmed
 
 SIMULATION_BANNER = "SIMULATION : faux modèle, résultats sans valeur"
 FOOTER = "Généré avec SAVE Run (https://allrun.be)"
@@ -26,6 +29,7 @@ CSV_FIELDS = ["model", "variant", "levers", "score", "ci_low", "ci_high", "n_cas
 
 # --- Formatting --------------------------------------------------------------------
 
+SHORT_STATUS = {PLUS_CHERE: "démontré, + chère"}   # terminal only
 TRUNCATED_ERRORS_FROM = 0.02      # from this share of truncated answers, the report says what they explain
 
 
@@ -298,25 +302,32 @@ def render_table(o: RunOutcome) -> Table:
     title = f"SAVE Run — seuil {pct(o.plan.config.seuil_qualite)} sur la borne basse"
     if o.plan.dry_run:
         title = f"{SIMULATION_BANNER.upper()}\n{title}"
-    t = Table(title=title, title_style="bold red" if o.plan.dry_run else "bold")
+    t = Table(title=title, title_style="bold red" if o.plan.dry_run else "bold", box=box.SIMPLE_HEAD,
+              show_edge=False, pad_edge=False, collapse_padding=True)
+    names = short_model_names([r.model for r in o.rows])
     show_fail = any(r.failed_share for r in o.rows)
     show_cut = any(r.truncated_share for r in o.rows)
-    cols = [("Var.", "left"), ("Modèle", "left"), ("Note", "right"), ("IC 95 %", "right"), ("Cas", "right"),
-            ("Tok. in", "right"), ("Tok. out", "right"), (f"{cur}/1000", "right")]
+    cols = [("Var.", "left"), ("Modèle", "left"), ("Note", "right"), ("IC 95 %", "right"), (f"{cur}/1000", "right")]
     cols += ([("Échecs", "right")] if show_fail else []) + ([("Tronq.", "right")] if show_cut else [])
-    cols += [("Statut", "left")]
     for name, justify in cols:
         t.add_column(name, justify=justify, no_wrap=True)
-    t.add_column("Leviers", overflow="ellipsis", no_wrap=True)
+    t.add_column("Statut")  # the one column allowed to wrap, so that a narrow window never crushes the figures
     for r in o.rows:
-        status = r.status + (" (non comparable)" if r.unfair else "")
-        cells = [r.variant + (" *" if r.status == RETENUE else ""), r.model, pct(r.score),
-                 f"{pct(r.lo)}-{pct(r.hi)}", f"{r.n_cases}/{r.n_planned}", num(r.avg_in, 0), num(r.avg_out, 0),
-                 num(r.cost_per_1000) + ("~" if r.estimated else "")]
+        status = SHORT_STATUS.get(r.status, r.status) + (" (non comp.)" if r.unfair else "")
+        cells = [r.variant + (" *" if r.status == RETENUE else ""), names[r.model], pct(r.score),
+                 f"{pct(r.lo)}-{pct(r.hi)}", num(r.cost_per_1000) + ("~" if r.estimated else "")]
         cells += ([pct(r.failed_share)] if show_fail else []) + ([pct(r.truncated_share)] if show_cut else [])
-        t.add_row(*cells, status, r.description,
+        t.add_row(*cells, status,
                   style="bold" if r.status == RETENUE else ("dim" if r.status == NON_TESTE else None))
     return t
+
+
+def short_model_names(models: list[str]) -> dict[str, str]:
+    """Model id -> short name for the terminal. Two ids that would read the same both keep their full id."""
+    ids = list(dict.fromkeys(models))
+    short = {m: re.sub(r"-\d{8}$", "", m.rsplit("/", 1)[-1].removeprefix("claude-")) for m in ids}
+    seen = Counter(short.values())
+    return {m: s if seen[s] == 1 else m for m, s in short.items()}
 
 
 def print_summary(o: RunOutcome, console: Console) -> None:
@@ -325,6 +336,10 @@ def print_summary(o: RunOutcome, console: Console) -> None:
     console.print(render_table(o))
     console.print("* = couple retenu (le moins cher dont la borne basse atteint le seuil) ; ~ = coût estimé.",
                   highlight=False)
+    legend = [f"{s} = {m}" for m, s in short_model_names([r.model for r in o.rows]).items() if s != m]
+    if legend:
+        console.print("Modèles : " + " ; ".join(legend), highlight=False)
+    console.print("Détail complet (leviers, tokens, cas, échecs) dans report.md.", highlight=False)
     console.print(f"\n[bold]Verdict[/] : {verdict(o)}", highlight=False)
     for line in separation_lines(o):
         console.print(f"  ! {line}", highlight=False)

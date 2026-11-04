@@ -13,11 +13,12 @@ from saverun.config import load_config, parse_config
 from saverun.cost import PriceTable, load_prices
 from saverun.fake import FakeClient
 from saverun.pipeline import execute_plan, prepare
-from saverun.report import (FOOTER, SIMULATION_BANNER, economy_lines, print_summary, render_report,
-                            truncated_error_lines, validation_lines, verdict, write_outputs)
+from saverun.report import (FOOTER, SIMULATION_BANNER, economy_lines, print_summary, render_report, render_table,
+                            short_model_names, truncated_error_lines, validation_lines, verdict, write_outputs)
 from saverun.runner import ModelRuntime, RunStore
 from saverun.scoring import variant_score
-from saverun.selection import NOT_SEPARATED_ALL, Row, Selection, Validation, compute_economy, select
+from saverun.selection import (NOT_SEPARATED_ALL, PLUS_CHERE, RETENUE, Row, Selection, Validation, compute_economy,
+                               select)
 from saverun.splitting import load_cases
 
 SECRET = "sk-SECRET-0123456789"
@@ -182,6 +183,55 @@ def test_truncation_line_needs_two_percent_and_a_truncated_error():
     assert not truncated_error_lines(truncated_rows(("m", 0.019, 3, 2)))
     assert not truncated_error_lines(truncated_rows(("m", 0.05, 3, 0)))    # truncated, yet none of them wrong
     assert not truncated_error_lines(truncated_rows(("m", 0.05, 0, 0)))
+
+
+def table_at(width, rows):
+    outcome = NS(rows=rows, plan=NS(dry_run=False, prices=NS(currency="USD"), config=NS(seuil_qualite=0.7)))
+    console = Console(record=True, width=width)
+    console.print(render_table(outcome))
+    return console.export_text()
+
+
+LONG_NAMES = ("claude-sonnet-4-5-20250929", "nvidia/nemotron-3.5-bolt-e4b")
+
+
+def test_terminal_table_stays_readable_at_100_columns_with_every_optional_column():
+    rows = [row("BASE", 1.089, 88, 88, model=LONG_NAMES[0], truncated_share=0.091, failed_share=0.2, status=RETENUE),
+            row("V02", 0.036, 80, 88, model=LONG_NAMES[1], estimated=True, failed_share=0.2, status=PLUS_CHERE)]
+    text = table_at(100, rows)
+    assert all(len(line) <= 100 for line in text.splitlines())
+    for cell in ("BASE *", "sonnet-4-5", "nemotron-3.5-bolt-e4b", "100 %", "96 %-100 %", "1,089", "0,036~", "9 %",
+                 "20 %", "retenue", "démontré", "+ chère"):
+        assert cell in text, cell
+
+
+def test_terminal_table_keeps_its_figures_at_80_columns():
+    text = table_at(80, [row("V02", 0.036, 80, 88, model=LONG_NAMES[1], status=RETENUE)])
+    for cell in ("V02 *", "nemotron-3.5-bolt-e4b", "91 %", "83 %-95 %", "0,036", "retenue"):
+        assert cell in text, cell
+
+
+def test_short_model_names_stay_unambiguous():
+    assert short_model_names([*LONG_NAMES, LONG_NAMES[0]]) == {LONG_NAMES[0]: "sonnet-4-5",
+                                                               LONG_NAMES[1]: "nemotron-3.5-bolt-e4b"}
+    clash = ["a/modele", "b/modele", "claude-modele-20250101", "autre"]
+    assert short_model_names(clash) == {m: m for m in clash}
+
+
+def test_terminal_gives_the_legend_and_points_to_the_report(tmp_path):
+    cfg = load_config("config.example.yaml")
+    cases, _ = load_cases("cases.example.csv")
+    store = RunStore(tmp_path / "runs")
+    plan = prepare(cfg, cases, load_prices("prices.yaml"), store, dry_run=True)
+    runtimes = {m.id: ModelRuntime(FakeClient(m.id, {c.input: c.expected for c in cases}, seed=0), None)
+                for m in cfg.models}
+    outcome = execute_plan(plan, runtimes, store)
+    renamed = [dataclasses.replace(r, model="fournisseur/" + r.model) for r in outcome.rows]
+    console = Console(record=True, width=400)
+    print_summary(dataclasses.replace(outcome, rows=renamed), console)
+    text = console.export_text()
+    assert "modele-exemple-anthropic = fournisseur/modele-exemple-anthropic" in text
+    assert "Détail complet" in text and "report.md" in text
 
 
 def test_cli_without_command_prints_help(capsys):
