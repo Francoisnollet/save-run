@@ -125,6 +125,15 @@ def test_truncated_share_and_free_model_flag():
     assert r.truncated_share == pytest.approx(0.3) and r.estimated
 
 
+def test_wrong_answers_count_those_truncated_and_the_score_does_not_change():
+    expected = {f"C{i}": "a" for i in range(5)}
+    results = [res("V01", "C0"), res("V01", "C1", out="b"), res("V01", "C2", out="b", truncated=True),
+               res("V01", "C3", truncated=True), res("V01", "C4", status="failed", out=None)]
+    (r,) = build_rows(results, expected, [V("V01")], CFG, PRICES)
+    assert (r.wrong_answers, r.wrong_truncated) == (2, 1)
+    assert r.score == 0.5 and r.n_cases == 4 and r.truncated_share == pytest.approx(0.5)
+
+
 def test_all_failed_and_untested_models():
     expected = {"C0": "a", "C1": "a"}
     results = ([res("V01", "C0", "failed", error="e"), res("V01", "C1", "failed", error="e")]

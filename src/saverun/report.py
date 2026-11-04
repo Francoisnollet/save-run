@@ -26,6 +26,9 @@ CSV_FIELDS = ["model", "variant", "levers", "score", "ci_low", "ci_high", "n_cas
 
 # --- Formatting --------------------------------------------------------------------
 
+TRUNCATED_ERRORS_FROM = 0.02      # from this share of truncated answers, the report says what they explain
+
+
 def pct(x: float, digits: int = 0) -> str:
     return f"{x * 100:.{digits}f}".replace(".", ",") + " %"
 
@@ -140,6 +143,18 @@ def truncation_lines(o: RunOutcome) -> list[str]:
             "autres, donc le plus souvent fausse."]
 
 
+def truncated_error_lines(o: RunOutcome) -> list[str]:
+    """How many wrong answers were truncated, for variants with enough truncated answers. Scores stay as they are."""
+    lines = []
+    for r in o.rows:
+        if r.truncated_share + 1e-9 < TRUNCATED_ERRORS_FROM or not r.wrong_truncated:
+            continue
+        n, m, name = r.wrong_truncated, r.wrong_answers, f"{r.variant} sur {r.model}"
+        lines.append(f"Les erreurs de {name} viennent surtout des troncatures ({n} sur {m})." if 2 * n > m
+                     else f"{n} erreur(s) sur {m} de {name} viennent de troncatures.")
+    return lines
+
+
 def failure_lines(o: RunOutcome) -> list[str]:
     unfair = [r for r in o.rows if r.unfair]
     lines = []
@@ -241,6 +256,7 @@ def render_report(o: RunOutcome, footer: bool = True) -> str:
           f"- Passages par cas : {cfg.runs_per_case}."]
     L += [f"- Modèle {m.id} : température : {_temperature(m)}." for m in cfg.models]
     L += [f"- {x}" for x in truncation_lines(o)]
+    L += [f"- {x}" for x in truncated_error_lines(o)]
     L += [f"- {x}" for x in failure_lines(o)]
     L += ["", "## Prix", ""] + [f"- {x}" for x in price_notes(o)]
     caveats = [*o.plan.prices.warnings([m.id for m in cfg.models]), *o.plan.warnings, *o.notes]

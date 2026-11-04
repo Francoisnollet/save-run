@@ -13,8 +13,8 @@ from saverun.config import load_config, parse_config
 from saverun.cost import PriceTable, load_prices
 from saverun.fake import FakeClient
 from saverun.pipeline import execute_plan, prepare
-from saverun.report import (FOOTER, SIMULATION_BANNER, economy_lines, print_summary, render_report, validation_lines,
-                            verdict, write_outputs)
+from saverun.report import (FOOTER, SIMULATION_BANNER, economy_lines, print_summary, render_report,
+                            truncated_error_lines, validation_lines, verdict, write_outputs)
 from saverun.runner import ModelRuntime, RunStore
 from saverun.scoring import variant_score
 from saverun.selection import NOT_SEPARATED_ALL, Row, Selection, Validation, compute_economy, select
@@ -159,6 +159,29 @@ def test_report_and_terminal_warn_when_the_test_set_does_not_separate_the_varian
     console = Console(record=True, width=400)
     print_summary(same, console)
     assert NOT_SEPARATED_ALL in console.export_text()
+
+
+def truncated_rows(*rows):
+    return NS(rows=[row("V01", 1.0, 90, 100, model=m, truncated_share=s, wrong_answers=w, wrong_truncated=t)
+                    for m, s, w, t in rows])
+
+
+def test_errors_explained_by_truncation_are_named_with_their_count():
+    assert truncated_error_lines(truncated_rows(("m", 0.09, 8, 8))) == [
+        "Les erreurs de V01 sur m viennent surtout des troncatures (8 sur 8)."]
+    assert truncated_error_lines(truncated_rows(("m", 0.023, 3, 2))) == [
+        "Les erreurs de V01 sur m viennent surtout des troncatures (2 sur 3)."]
+
+
+def test_surtout_is_only_said_above_half_of_the_errors():
+    assert truncated_error_lines(truncated_rows(("m", 0.05, 4, 2))) == ["2 erreur(s) sur 4 de V01 sur m viennent de troncatures."]
+
+
+def test_truncation_line_needs_two_percent_and_a_truncated_error():
+    assert truncated_error_lines(truncated_rows(("m", 0.02, 3, 2)))        # exactly 2 %
+    assert not truncated_error_lines(truncated_rows(("m", 0.019, 3, 2)))
+    assert not truncated_error_lines(truncated_rows(("m", 0.05, 3, 0)))    # truncated, yet none of them wrong
+    assert not truncated_error_lines(truncated_rows(("m", 0.05, 0, 0)))
 
 
 def test_cli_without_command_prints_help(capsys):

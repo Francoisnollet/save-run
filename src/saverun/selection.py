@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from .config import Config
 from .cost import PriceTable, Savings, cost_per_1000, savings
 from .runner import MAX_FAILED_SHARE, CallResult, untested_models
-from .scoring import case_rates, max_lower_bound, variant_score
+from .scoring import case_rates, max_lower_bound, score_output, variant_score
 from .variants import BASE_ID
 
 NEAR_TIE_MARGIN = 0.10      # within 10 % of the winner's cost
@@ -43,6 +43,8 @@ class Row:
     truncated_share: float
     status: str = ""
     note: str = ""
+    wrong_answers: int = 0            # completed answers scored wrong (per answer, not per case)
+    wrong_truncated: int = 0          # those that were also truncated
 
     @property
     def unfair(self) -> bool:
@@ -140,9 +142,11 @@ def build_rows(results: list[CallResult], expected: dict[str, str], variants, co
             continue
         avg_in = sum(r.tokens_in for r in done) / len(done)
         avg_out = sum(r.tokens_out for r in done) / len(done)
+        wrong = [r for r in done if not score_output(r.output, expected[r.case], config.scoring, config.fields).correct]
         rows.append(Row(**base, n_cases=n, score=score, lo=lo, hi=hi, avg_in=avg_in, avg_out=avg_out,
                         cost_per_1000=cost_per_1000(avg_in, avg_out, price), failed_share=failed_share,
-                        truncated_share=sum(r.truncated for r in done) / len(done)))
+                        truncated_share=sum(r.truncated for r in done) / len(done), wrong_answers=len(wrong),
+                        wrong_truncated=sum(r.truncated for r in wrong)))
     return rows
 
 
