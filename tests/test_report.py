@@ -81,7 +81,7 @@ def test_resume_does_not_repay_calls_and_simulation_never_feeds_a_real_run(tmp_p
 
 def test_real_mode_writes_the_files_to_apply(tmp_path, monkeypatch):
     """Same pipeline with dry_run=False (still the fake model): best_prompt.txt and best_config.json appear."""
-    monkeypatch.setenv("ANTHROPIC_API_KEY", SECRET)
+    monkeypatch.setenv("SAVERUN_ANTHROPIC_KEY", SECRET)
     cfg = load_config("config.example.yaml")
     cases, _ = load_cases("cases.example.csv")
     store = RunStore(tmp_path / "runs")
@@ -125,16 +125,16 @@ def test_max_calls_is_enforced_before_any_call(tmp_path, capsys):
 
 
 def test_missing_api_key_stops_before_the_prompt(tmp_path, capsys, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("SAVERUN_ANTHROPIC_KEY", raising=False)
     monkeypatch.delenv("EXEMPLE_API_KEY", raising=False)
     monkeypatch.setattr("builtins.input", lambda _: pytest.fail("must not ask before checking the keys"))
     assert main(example_args(tmp_path)) == 2
     err = capsys.readouterr().err
-    assert "ANTHROPIC_API_KEY" in err and "EXEMPLE_API_KEY" in err
+    assert "SAVERUN_ANTHROPIC_KEY" in err and "EXEMPLE_API_KEY" in err
 
 
 def test_declining_the_confirmation_makes_no_call(tmp_path, monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
+    monkeypatch.setenv("SAVERUN_ANTHROPIC_KEY", "x")
     monkeypatch.setenv("EXEMPLE_API_KEY", "x")
     monkeypatch.setattr("builtins.input", lambda _: "n")
     assert main(example_args(tmp_path)) == 1

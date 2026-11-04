@@ -25,7 +25,7 @@ role: un agent de support client expérimenté
 models:
   - id: modele-exemple-anthropic        # identifiant exact chez le fournisseur
     provider: anthropic
-    api_key_env: ANTHROPIC_API_KEY
+    api_key_env: SAVERUN_ANTHROPIC_KEY
     rpm: 50                             # requêtes par minute
     # temperature: 0                    # optionnel ; absent = non envoyé à l'API
   - id: modele-exemple-compatible
