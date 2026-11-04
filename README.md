@@ -75,6 +75,12 @@ Fichiers produits dans `saverun-out/` : `results.csv` (une ligne par variante et
 
 Options utiles : `--dry-run` (faux modèle, reproductible avec `--seed`), `--yes` (sans confirmation), `--out`, `--no-footer`.
 
+### Choisir le seuil
+
+Le seuil de qualité (`seuil_qualite`) est une **décision métier** : le même test peut donner un autre gagnant à 70 % et à 95 %, car un seuil plus exigeant écarte des couples moins chers.
+
+Il dépend aussi du nombre de cas. Avec n cas de sélection, la borne basse maximale, atteinte avec une note de 100 %, est n/(n+3,84). Un seuil de 95 % demande donc au moins 73 cas de sélection, soit environ 100 cas au total avec `validation_part` à 0,25 et les 3 exemples few-shot.
+
 ### Configuration, prix, fournisseurs
 
 - **`config.yaml`** : voir [config.example.yaml](config.example.yaml), commenté champ par champ. Aucun modèle n'est écrit en dur dans le code. `output_format` (optionnel) dit au modèle comment répondre et est ajouté à chaque variante générée, y compris sans exemple ; il est indispensable avec `json_fields` (sans lui, un avertissement s'affiche). `temperature` est optionnelle par modèle : absente, elle n'est jamais envoyée à l'API (le rapport indique « défaut du fournisseur »). Pour de l'extraction JSON, **augmentez `max_tokens`** (300 par défaut) : une réponse tronquée est notée comme les autres, donc le plus souvent fausse, et le rapport en donne la part par variante.
@@ -86,10 +92,12 @@ Le moteur est importable (`saverun.pipeline.prepare` puis `execute_plan`), la li
 
 ## Limites connues
 
-- **La v0 n'a été testée qu'avec un faux modèle**, jusqu'au premier vrai run. Les adaptateurs `anthropic` et `openai_compatible` ne l'ont été qu'avec de faux clients : le comportement réel des API (comptage des tokens, motifs d'arrêt, limites de débit) n'a pas encore été observé.
+- **Testée sur quelques runs réels seulement** : une seule tâche de classification (détection d'urgence sur e-mails synthétiques) et trois modèles. Ces runs ne disent rien des autres tâches ni des autres fournisseurs, et les situations qu'ils n'ont pas rencontrées ne sont vérifiées qu'avec de faux clients.
 - **Petits échantillons.** Avec peu de cas, les intervalles sont larges et le seuil peut être inatteignable (20 cas au total laissent 13 cas de sélection environ, soit une borne basse maximale d'environ 77 %). La validation sur peu de cas n'est qu'indicative. Visez 50 cas ou plus.
+- **Petits écarts indépartageables.** Sur des écarts de quelques points, 88 cas de sélection ne permettent pas de départager des variantes : 100 % donne un intervalle de 96 à 100 % et 95,5 % un intervalle de 89 à 98 %, qui se chevauchent. Un écart plus net se voit : 90,9 % donne 83 à 95 %, sans chevauchement avec 100 %.
+- **Toutes les erreurs comptent pareil.** Rater une urgence vaut autant que de la sur-détecter. Si l'une des deux erreurs vous coûte plus cher, la note ne le reflète pas.
 - **Tâches à sortie vérifiable seulement.** La notation est déterministe (`exact`, `json_fields` tout-ou-rien) : pas de juge LLM, donc pas de textes libres, de résumés ni de rédaction.
-- **Coût estimé, pas facture réelle.** Le coût est le nombre de tokens renvoyé par l'API multiplié par les prix de `prices.yaml`. Il ne tient compte ni des remises (cache, lots) ni d'un éventuel changement de tarif, et n'inclut pas le coût de l'exécution de SAVE Run elle-même (appels de test, réessais). Un modèle gratuit est valorisé à un tarif de référence.
+- **Coût estimé, pas facture réelle.** Le coût est le nombre de tokens renvoyé par l'API multiplié par les prix de `prices.yaml`. Il ne tient compte ni des remises (cache, lots) ni d'un éventuel changement de tarif, et n'inclut pas le coût de l'exécution de SAVE Run elle-même (appels de test, réessais). Un modèle gratuit est valorisé à un tarif de référence : c'est un coût estimé, pas une économie réelle.
 - **Prix à vérifier.** Les prix fournis sont des exemples fictifs. Vérifiez-les, avec leur date et leur source, avant de vous fier à un chiffre d'économie.
 - **Variantes par gabarit seulement** : quatre leviers, gabarits en français ; pas de variantes générées par un LLM, pas d'arrêt anticipé, pas d'interface web.
 - **L'économie suppose le même volume et le même type d'entrées** que vos cas de test.
