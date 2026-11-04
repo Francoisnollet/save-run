@@ -17,7 +17,7 @@ from .runner import MAX_FAILED_SHARE
 from .selection import NON_TESTE, RETENUE, Row, winner_confirmed
 
 SIMULATION_BANNER = "SIMULATION : faux modèle, résultats sans valeur"
-FOOTER = "Généré avec SAVE Run (https://allrun.ai)"
+FOOTER = "Généré avec SAVE Run (https://allrun.be)"
 
 CSV_FIELDS = ["model", "variant", "levers", "score", "ci_low", "ci_high", "n_cases", "avg_tokens_in",
               "avg_tokens_out", "cost_per_1000", "currency", "estimated_cost", "status", "failed_share",

@@ -96,4 +96,4 @@ Le moteur est importable (`saverun.pipeline.prepare` puis `execute_plan`), la li
 
 ## Licence
 
-MIT, voir [LICENSE](LICENSE). Un projet [allrun](https://allrun.ai).
+MIT, voir [LICENSE](LICENSE). Un projet [allrun](https://allrun.be).
