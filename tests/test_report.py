@@ -23,7 +23,7 @@ SECRET = "sk-SECRET-0123456789"
 
 def example_args(tmp_path, *extra, config="config.example.yaml", prices="prices.yaml"):
     return ["run", "--config", str(config), "--cases", "cases.example.csv", "--prices", str(prices),
-            "--out", str(tmp_path / "out"), *extra]
+            "--out", str(tmp_path / "out"), "--env", str(tmp_path / "absent.env"), *extra]  # never the real .env
 
 
 def rewrite(tmp_path, source, name, edit):
