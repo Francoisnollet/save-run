@@ -1,21 +1,23 @@
 """End-to-end and report tests. Everything runs on the fake model: no network, no real key."""
 import csv
+import dataclasses
 import json
 from types import SimpleNamespace as NS
 
 import pytest
 import yaml
+from rich.console import Console
 
 from saverun.cli import main
 from saverun.config import load_config, parse_config
 from saverun.cost import PriceTable, load_prices
 from saverun.fake import FakeClient
 from saverun.pipeline import execute_plan, prepare
-from saverun.report import (FOOTER, SIMULATION_BANNER, economy_lines, render_report, validation_lines, verdict,
-                            write_outputs)
+from saverun.report import (FOOTER, SIMULATION_BANNER, economy_lines, print_summary, render_report, validation_lines,
+                            verdict, write_outputs)
 from saverun.runner import ModelRuntime, RunStore
 from saverun.scoring import variant_score
-from saverun.selection import Row, Selection, Validation, compute_economy, select
+from saverun.selection import NOT_SEPARATED_ALL, Row, Selection, Validation, compute_economy, select
 from saverun.splitting import load_cases
 
 SECRET = "sk-SECRET-0123456789"
@@ -139,6 +141,24 @@ def test_declining_the_confirmation_makes_no_call(tmp_path, monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _: "n")
     assert main(example_args(tmp_path)) == 1
     assert not (tmp_path / "out" / "runs").exists()
+
+
+def test_report_and_terminal_warn_when_the_test_set_does_not_separate_the_variants(tmp_path):
+    cfg = load_config("config.example.yaml")
+    cases, _ = load_cases("cases.example.csv")
+    store = RunStore(tmp_path / "runs")
+    plan = prepare(cfg, cases, load_prices("prices.yaml"), store, dry_run=True)
+    runtimes = {m.id: ModelRuntime(FakeClient(m.id, {c.input: c.expected for c in cases}, seed=0), None)
+                for m in cfg.models}
+    outcome = execute_plan(plan, runtimes, store)
+    assert NOT_SEPARATED_ALL not in render_report(outcome)     # the example's fake scores are spread out
+
+    same = dataclasses.replace(outcome, rows=[dataclasses.replace(r, score=1.0) for r in outcome.rows])
+    report = render_report(same)
+    assert NOT_SEPARATED_ALL in report and report.index(NOT_SEPARATED_ALL) < report.index("## Économie")
+    console = Console(record=True, width=400)
+    print_summary(same, console)
+    assert NOT_SEPARATED_ALL in console.export_text()
 
 
 def test_cli_without_command_prints_help(capsys):

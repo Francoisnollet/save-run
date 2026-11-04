@@ -1,11 +1,14 @@
+from types import SimpleNamespace as NS
+
 import pytest
 
 from saverun.config import parse_config
 from saverun.cost import ModelPrice, PriceTable
 from saverun.runner import CallResult
 from saverun.scoring import variant_score, wilson
-from saverun.selection import (NON_TESTE, PLUS_CHERE, QUASI, RETENUE, SANS_REPONSE, SOUS_SEUIL, Row, build_rows,
-                               min_cases_for, reachability, select, validate, validation_pairs, winner_confirmed)
+from saverun.selection import (NON_TESTE, NOT_SEPARATED_ALL, NOT_SEPARATED_DIRECT, PLUS_CHERE, QUASI, RETENUE,
+                               SANS_REPONSE, SOUS_SEUIL, Row, build_rows, min_cases_for, not_separated, reachability,
+                               select, validate, validation_pairs, winner_confirmed)
 
 CFG = parse_config({"intention": "x", "seuil_qualite": 0.75,
                     "models": [{"id": "m", "provider": "anthropic", "api_key_env": "K", "rpm": 10}]})
@@ -199,3 +202,72 @@ def test_reachability_message():
 def test_min_cases_for():
     assert min_cases_for(0.75) == 12 and min_cases_for(0.90) == 35
     assert wilson(12, 12)[0] >= 0.75 > wilson(11, 11)[0]
+
+
+# --- does the test set separate the variants? --------------------------------------------------
+
+def variants(*with_reasoning, all_ids=("V01", "V02", "V03", "V04", "V05")):
+    return [NS(id=i, reasoning=i in with_reasoning) for i in all_ids]
+
+
+def scored(*scores, n=100, model="m"):
+    return [row(f"V{i:02d}", 1.0, s, n, model=model) for i, s in enumerate(scores, start=1)]
+
+
+def test_rule_a_at_exactly_80_percent_of_the_variants_at_98_percent():
+    rows = scored(98, 98, 98, 98, 50)
+    assert not_separated(rows, variants("V05"), 0.7) == [f"m : {NOT_SEPARATED_ALL}"]
+    assert not_separated(scored(98, 98, 98, 90, 50), variants("V05"), 0.7) == []   # 3 out of 5, gap of 8 points
+
+
+def test_rule_b_at_exactly_three_points_among_the_variants_without_reasoning():
+    rows = scored(95, 92, 94, 10, 10)
+    assert not_separated(rows, variants("V04", "V05"), 0.7) == [f"m : {NOT_SEPARATED_DIRECT}"]
+    assert not_separated(scored(95, 91, 94, 10, 10), variants("V04", "V05"), 0.7) == []
+
+
+def test_rule_b_tolerates_one_case_when_a_case_weighs_more_than_three_points():
+    rows = scored(20, 19, 20, n=20)
+    ids = ("V01", "V02", "V03")
+    assert not_separated(rows, variants(all_ids=ids), 0.7) == [f"m : {NOT_SEPARATED_DIRECT}"]
+    assert not_separated(scored(20, 18, 20, n=20), variants(all_ids=ids), 0.7) == []
+
+
+def test_rule_b_needs_a_variant_at_the_threshold():
+    ids = ("V01", "V02", "V03")
+    assert not_separated(scored(55, 54, 55), variants(all_ids=ids), 0.7) == []
+    assert not_separated(scored(70, 69, 70), variants(all_ids=ids), 0.7) == [f"m : {NOT_SEPARATED_DIRECT}"]
+
+
+def test_too_few_variants_to_compare():
+    ids = ("V01", "V02")
+    assert not_separated(scored(100, 100), variants(all_ids=ids), 0.7) == []
+    # Rule B needs three variants without reasoning: two here, far from the ones with reasoning.
+    four = ("V01", "V02", "V03", "V04")
+    assert not_separated(scored(90, 90, 10, 10), variants("V03", "V04", all_ids=four), 0.7) == []
+
+
+def test_models_are_judged_apart_and_named_together():
+    rows = scored(100, 100, 100, model="a") + scored(100, 100, 100, model="b") + scored(100, 50, 20, model="c")
+    ids = ("V01", "V02", "V03")
+    assert not_separated(rows, variants(all_ids=ids), 0.7) == [f"a, b : {NOT_SEPARATED_ALL}"]
+
+
+def test_rule_a_comes_first_for_a_model_and_each_message_is_listed():
+    rows = scored(100, 100, 100, model="a") + scored(90, 90, 90, 10, model="b")
+    ids = ("V01", "V02", "V03", "V04")
+    assert not_separated(rows, variants("V04", all_ids=ids), 0.7) == [f"a : {NOT_SEPARATED_ALL}",
+                                                                      f"b : {NOT_SEPARATED_DIRECT}"]
+
+
+def test_rows_not_comparable_are_left_out():
+    rows = [*scored(100, 100, 100), row("V04", 1.0, 10, 100, failed_share=0.5),
+            row("V05", 1.0, 0, 100, n_cases=0, status=NON_TESTE)]
+    assert not_separated(rows, variants(), 0.7) == [f"m : {NOT_SEPARATED_ALL}"]
+    assert not_separated([row("V01", None, 0, 100, n_cases=0, status=NON_TESTE)], variants(), 0.7) == []
+
+
+def test_base_counts_as_a_variant_without_reasoning():
+    rows = [row("BASE", 1.0, 95, 100), *scored(95, 95), row("V03", 1.0, 10, 100)]
+    vs = [NS(id="BASE", reasoning=None), *variants("V03", all_ids=("V01", "V02", "V03"))]
+    assert not_separated(rows, vs, 0.7) == [f"m : {NOT_SEPARATED_DIRECT}"]

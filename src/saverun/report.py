@@ -14,7 +14,7 @@ from rich.table import Table
 
 from .pipeline import RunOutcome
 from .runner import MAX_FAILED_SHARE
-from .selection import NON_TESTE, RETENUE, Row, winner_confirmed
+from .selection import NON_TESTE, RETENUE, Row, not_separated, winner_confirmed
 
 SIMULATION_BANNER = "SIMULATION : faux modèle, résultats sans valeur"
 FOOTER = "Généré avec SAVE Run (https://allrun.be)"
@@ -60,6 +60,10 @@ def verdict(o: RunOutcome) -> str:
     if w.unfair:
         text += (f" Non comparable équitablement ({pct(w.failed_share)} d'appels en échec) : à relancer.")
     return text
+
+
+def separation_lines(o: RunOutcome) -> list[str]:
+    return not_separated(o.rows, o.plan.all_variants, o.plan.config.seuil_qualite)
 
 
 def economy_lines(o: RunOutcome) -> list[str]:
@@ -219,7 +223,10 @@ def render_report(o: RunOutcome, footer: bool = True) -> str:
     L: list[str] = ["# Rapport SAVE Run", ""]
     if o.plan.dry_run:
         L += [f"> **{SIMULATION_BANNER}**", ""]
-    L += ["## Verdict", "", verdict(o), "", "## Économie", ""]
+    L += ["## Verdict", "", verdict(o), ""]
+    for x in separation_lines(o):
+        L += [f"**Attention.** {x}", ""]
+    L += ["## Économie", ""]
     L += [f"- {x}" for x in economy_lines(o)]
     L += ["", "## Validation", ""]
     L += [f"- {x}" for x in validation_lines(o)]
@@ -303,6 +310,8 @@ def print_summary(o: RunOutcome, console: Console) -> None:
     console.print("* = couple retenu (le moins cher dont la borne basse atteint le seuil) ; ~ = coût estimé.",
                   highlight=False)
     console.print(f"\n[bold]Verdict[/] : {verdict(o)}", highlight=False)
+    for line in separation_lines(o):
+        console.print(f"  ! {line}", highlight=False)
     for line in economy_lines(o):
         console.print(f"  {line}", highlight=False)
     console.print("\n[bold]Validation[/]", highlight=False)

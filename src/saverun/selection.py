@@ -172,6 +172,44 @@ def select(rows: list[Row], threshold: float) -> Selection:
     return Selection(out, final_winner, ties, threshold)
 
 
+# --- Does the test set separate the variants? ---------------------------------------
+
+NOT_SEPARATED_ALL = ("Presque toutes les variantes obtiennent la même note : le jeu de test ne permet pas de les "
+                     "départager. Le choix repose surtout sur le coût. Ajoutez des cas plus difficiles ou comparez "
+                     "d'autres modèles.")
+NOT_SEPARATED_DIRECT = ("Les variantes sans raisonnement obtiennent presque toutes la même note : le jeu de test ne "
+                        "permet pas de les départager. Le choix repose surtout sur le coût. Ajoutez des cas plus "
+                        "difficiles ou comparez d'autres modèles.")
+HIGH_SCORE = 0.98
+HIGH_SCORE_SHARE = 0.80
+SMALL_GAP = 0.03
+MIN_VARIANTS_TO_COMPARE = 3
+
+
+def not_separated(rows: list[Row], variants, threshold: float) -> list[str]:
+    """One warning per message, naming the models whose variants all score about the same. Scores are not touched.
+
+    Rule A: at least 80 % of a model's variants score 98 % or more. Rule B: among its variants without reasoning,
+    the gap is at most 3 points or one case, and the best one reaches the threshold (otherwise cost decides nothing).
+    """
+    with_reasoning = {v.id for v in variants if v.reasoning}
+    by_model: dict[str, list[Row]] = {}
+    for r in rows:
+        if r.n_cases > 0 and not r.unfair:
+            by_model.setdefault(r.model, []).append(r)
+    found: dict[str, list[str]] = {}
+    for model, group in by_model.items():
+        direct = [r.score for r in group if r.variant not in with_reasoning]
+        n = max(r.n_cases for r in group)
+        if (len(group) >= MIN_VARIANTS_TO_COMPARE
+                and sum(r.score + EPS >= HIGH_SCORE for r in group) / len(group) + EPS >= HIGH_SCORE_SHARE):
+            found.setdefault(NOT_SEPARATED_ALL, []).append(model)
+        elif (len(direct) >= MIN_VARIANTS_TO_COMPARE and max(direct) + EPS >= threshold
+                and max(direct) - min(direct) <= max(SMALL_GAP, 1 / n) + EPS):
+            found.setdefault(NOT_SEPARATED_DIRECT, []).append(model)
+    return [f"{', '.join(models)} : {message}" for message, models in found.items()]
+
+
 # --- Validation --------------------------------------------------------------------
 
 def validation_pairs(selection: Selection) -> list[tuple[str, str]]:
