@@ -24,6 +24,9 @@ dist/
 # Sorties de SAVE Run (dossier par défaut)
 saverun-out/
 
+# Réglages locaux de l'éditeur
+.vscode/
+
 # Données réelles (e-mails anonymisés) : ne jamais versionner
 data/
 private/
