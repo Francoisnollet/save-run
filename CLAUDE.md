@@ -68,5 +68,13 @@ Pièges connus :
 - Remplacer `<url-du-dépôt>` dans le README au moment de publier.
 - Vérifier la limite de débit réelle de NVIDIA dans sa console : aucun chiffre officiel trouvé, `rpm` est à 30.
 - Corriger l'ancienne URL `allrun.ai` à la main dans les anciens rapports, s'ils sont partagés.
-- Relancer un run sur le fichier avec tags pour voir la section « Note par tag » sur de vraies données.
 - Revoir les critères ou l'étiquette de l'e-mail « Rendez-vous demain » : les critères d'urgence ne citent pas le lendemain, alors que l'étiquette attend `true`.
+- Tester sur un jeu public (type Banking77, 10 à 15 catégories, 150 à 200 cas) pour montrer un cas où les variantes de prompt comptent.
+- Trouver un cas réel auprès d'une entreprise.
+
+## Idées v1, ne pas coder sans accord
+
+- Signaler les cas ratés par presque toutes les variantes d'un modèle.
+- Mode sans étiquettes, avec les réponses du modèle actuel comme référence.
+- Pondération des erreurs (rater une urgence ou sur-détecter).
+- Noter toute modification d'étiquette décidée après lecture des résultats.
