@@ -27,6 +27,9 @@ saverun-out/
 # Réglages locaux de l'éditeur
 .vscode/
 
+# Notes personnelles, propres à cette machine
+NOTES.local.md
+
 # Données réelles (e-mails anonymisés) : ne jamais versionner
 data/
 private/
