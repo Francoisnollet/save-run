@@ -102,6 +102,78 @@ def test_expected_label_is_what_scoring_compares():
     assert expected_label('{"b": 1, "a": "Oui."}', "json_fields") == expected_label('{"a": "oui", "b": 1}', "json_fields")
 
 
+from saverun.scoring import ANSWER_MARKER, extract_answer
+
+
+def test_answer_marker_in_prompts_is_unchanged():
+    # ANSWER_MARKER is written into the reasoning prompts: changing it changes every prompt hash, hence the cache key,
+    # and every stored call would be paid again. The tolerant reading lives in a separate regex.
+    assert ANSWER_MARKER == "Réponse :"
+
+
+@pytest.mark.parametrize("reply", [
+    "Réflexion.\nRéponse : pending_transfer",
+    "Réflexion.\nRéponse: pending_transfer",
+    "Réflexion.\nRéponse\u00a0: pending_transfer",              # no-break space
+    "Réflexion.\nRéponse\u202f: pending_transfer",              # narrow no-break space
+    "Réflexion.\nRÉPONSE : pending_transfer",
+    "Let me think.\nAnswer: pending_transfer",
+    "Let me think.\nanswer : pending_transfer",
+    "Réflexion.\n**Réponse :** pending_transfer",
+    "Réflexion.\n**Réponse : pending_transfer**",
+    "Réflexion.\nRéponse : **pending_transfer**",
+    "Let me think.\n**Answer:** pending_transfer",
+    "Let me think.\n### Answer: pending_transfer",
+    "Let me think.\n> Answer: pending_transfer",
+    "  Réponse: pending_transfer",
+    "Réflexion... Réponse : pending_transfer",                  # the exact marker is still accepted mid-line
+])
+def test_tolerant_marker_forms(reply):
+    assert extract_answer(reply) == "pending_transfer"
+    assert score_output(reply, "pending_transfer", "exact").correct
+    assert not score_output(reply, "failed_transfer", "exact").correct
+
+
+def test_last_marker_wins_across_forms():
+    assert extract_answer("Answer: failed_transfer, maybe.\nOn second thought...\nRéponse: pending_transfer") \
+        == "pending_transfer"
+    assert extract_answer("Réponse : failed_transfer\nAnswer: pending_transfer") == "pending_transfer"
+    assert extract_answer("**Réponse :** a\n\n**Answer:** b") == "b"
+
+
+@pytest.mark.parametrize("reply", [
+    "I think my answer: pending_transfer is likely, but no.\nfailed_transfer",   # mid-line, lower case
+    "Réponses : pending_transfer",                                               # plural
+    "The customer answered: pending_transfer",
+    "Answer pending_transfer",                                                   # no colon
+    "La réponse : pending_transfer",                                             # lower case mid-line
+    "Final answer: pending_transfer",                                            # not in the accepted list
+])
+def test_no_false_marker(reply):
+    assert extract_answer(reply) == reply
+    assert not score_output(reply, "pending_transfer", "exact").correct
+
+
+def test_without_marker_nothing_changes_bold_included():
+    for reply in ["pending_transfer", "  Pending_transfer. ", "The closest category is **pending_transfer**.",
+                  "**pending_transfer**", '{"urgent": true}']:
+        assert extract_answer(reply) == reply
+    assert score_output("pending_transfer", "pending_transfer", "exact").correct
+    assert not score_output("**pending_transfer**", "pending_transfer", "exact").correct
+    assert not score_output("The closest category is **pending_transfer**.", "pending_transfer", "exact").correct
+
+
+@pytest.mark.parametrize("reply", [
+    'Réflexion.\nRéponse: {"urgent": true}',
+    'Let me think.\n**Answer:** ```json\n{"urgent": true}\n```',
+    'Réflexion.\n**Réponse :**\n\n{"urgent": true}',
+    'Exemple de format : {"urgent": false}. Ici l\'échéance est à 17h.\nAnswer: {"urgent": true}',
+])
+def test_tolerant_marker_with_json(reply):
+    assert score_output(reply, '{"urgent": true}', "json_fields", ["urgent"]).correct
+    assert not score_output(reply, '{"urgent": false}', "json_fields", ["urgent"]).correct
+
+
 @pytest.mark.parametrize("reply,expected_true", [
     ('Le ton est pressant : échéance à 17h, donc {"urgent": true} est probable.\nRéponse : {"urgent": true}', True),
     ('Pas de date, simple information.\nRéponse : {"urgent": false}', False),

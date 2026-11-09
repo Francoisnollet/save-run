@@ -63,11 +63,37 @@ def _norm(value: object) -> object:
     return value
 
 
+_SPACE = r"[ \t\u00a0\u202f]"   # incl. the no-break and narrow no-break spaces of French typography
+_BOLD = r"(?:\*\*|__)"
+# A tolerant marker, for reading only: « Réponse », « Answer », any case, at the start of a line (after optional
+# spaces, a quote sign `>` or a heading `#`), optionally in bold, with or without a space before the colon.
+# Mid-line it is not accepted, so a sentence such as "my answer: maybe" in the reasoning is never taken as the end.
+_LINE_MARKER = re.compile(
+    rf"^{_SPACE}*(?:>{_SPACE}*)?(?:#{{1,6}}{_SPACE}*)?{_BOLD}?(?:réponse|answer){_SPACE}*{_BOLD}?{_SPACE}*:{_BOLD}?",
+    re.IGNORECASE | re.MULTILINE)
+_WRAPPER = re.compile(rf"^{_BOLD}|{_BOLD}$")
+
+
+def _marker_end(output: str) -> int | None:
+    """End of the last answer marker: the exact ANSWER_MARKER anywhere, or a tolerant marker at a line start."""
+    ends = [m.end() for m in _LINE_MARKER.finditer(output)]
+    i = output.rfind(ANSWER_MARKER)
+    if i >= 0:
+        ends.append(i + len(ANSWER_MARKER))
+    return max(ends) if ends else None
+
+
 def extract_answer(output: str) -> str:
-    """With step-by-step reasoning the final answer follows the last « Réponse : » marker."""
-    if ANSWER_MARKER in output:
-        return output.split(ANSWER_MARKER)[-1]
-    return output
+    """With step-by-step reasoning the final answer follows the last answer marker.
+
+    The prompts always ask for ANSWER_MARKER; models also write « Réponse: », « Answer: » or a bold marker, which
+    are read the same way. Bold around the answer is removed only after a marker: an output without any marker is
+    returned unchanged, so a reply that ignores the requested format still counts as wrong.
+    """
+    end = _marker_end(output)
+    if end is None:
+        return output
+    return _WRAPPER.sub("", output[end:].strip()).strip()
 
 
 def parse_json_object(text: str) -> dict | None:
