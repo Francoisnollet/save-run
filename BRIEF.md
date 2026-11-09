@@ -52,7 +52,7 @@ SAVE Run sera publié en open source pour faire connaître son auteur (marque al
 - `intention` : ce que le prompt doit faire.
 - `base_prompt` : optionnel, le prompt actuel (variante de référence pour chiffrer l'économie).
 - `models` : liste ; chacun a `id`, `provider` (`anthropic` ou `openai_compatible`), `base_url` (pour `openai_compatible`), `api_key_env`, `rpm` (requêtes par minute). Jamais de modèle en dur dans le code.
-- `n_variants` (20 par défaut), `runs_per_case` (1), `seuil_qualite` (0,75), `validation_part` (0,25), `max_calls`, `scoring` (`exact` ou `json_fields`), `monthly_volume` (optionnel, pour l'économie en euros).
+- `n_variants` (20 par défaut), `runs_per_case` (1), `seuil_qualite` (0,75), `validation_part` (0,25), `max_calls`, `scoring` (`exact` ou `json_fields`), `monthly_volume` (optionnel, pour l'économie mensuelle dans la monnaie du fichier de prix).
 
 `cases.csv` : colonnes `input`, `expected`. 20 cas au minimum, 50 recommandés. En dessous de 20, avertir que le résultat est indicatif.
 
@@ -85,7 +85,7 @@ SAVE Run sera publié en open source pour faire connaître son auteur (marque al
 - **Ne jamais inventer de prix.** Valeurs d'exemple marquées `À VÉRIFIER`.
 - Un modèle absent du fichier est signalé, jamais valorisé à zéro en silence.
 - Modèle gratuit (palier d'essai) : exiger un **tarif de référence** explicite et l'afficher comme « coût estimé ».
-- Coût d'une variante = tokens moyens × prix, affiché pour 1 000 appels, et en euros par mois si `monthly_volume` est fourni.
+- Coût d'une variante = tokens moyens × prix, affiché pour 1 000 appels, et par mois, dans la monnaie du fichier de prix, si `monthly_volume` est fourni.
 
 ## Fournisseurs
 
@@ -176,3 +176,5 @@ Choix faits avec l'auteur en cours de route ; ils complètent ou précisent le b
 - **Raisonnement et `output_format`** : le format est placé avant la consigne de raisonnement, qui précise qu'il ne s'applique qu'à ce qui suit « Réponse : » (le raisonnement reste libre, rien ne suit la réponse), ce qui évite toute contradiction avec « sans texte avant ou après ». Sans `output_format`, la formulation d'origine est conservée.
 - **Exemples few-shot** : au moins un exemple par valeur attendue distincte quand les 3 emplacements le permettent ; sinon un avertissement nomme les valeurs absentes. La valeur attendue est celle que la notation compare (avec `json_fields`, seulement les champs de `fields`). L'ordre des exemples est mélangé pour ne pas suivre les valeurs.
 - **Colonne `tag` optionnelle** : `cases.csv` peut ajouter une colonne `tag` pour afficher une « Note par tag » sur les cas de sélection. Elle est purement informative : le tag n'est jamais envoyé au modèle et n'entre ni dans la clé de réutilisation, ni dans la séparation des cas, ni dans la sélection. Les fichiers à deux colonnes restent valides. Moins de 10 cas de sélection sous un tag déclenche un avertissement.
+- **Avertissement « le jeu de test ne discrimine pas »** : calculé par modèle, sur les variantes notées et comparables équitablement, sans toucher aux notes ni à la sélection. Règle A : au moins 80 % des variantes du modèle obtiennent 98 % ou plus. Règle B, sinon : parmi les variantes sans raisonnement (au moins 3), l'écart entre la meilleure et la moins bonne est d'au plus 3 points ou d'un cas, et la meilleure atteint le seuil. Le rapport dit alors que le choix repose surtout sur le coût et suggère des cas plus difficiles ou d'autres modèles.
+- **Erreurs dues aux troncatures** : pour chaque variante qui a des réponses tronquées, le rapport compte combien de ses réponses fausses étaient aussi tronquées (« n erreur(s) sur m viennent de troncatures », ou « viennent surtout des troncatures » au-delà de la moitié). Les réponses tronquées restent notées comme les autres.

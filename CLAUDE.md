@@ -10,10 +10,11 @@ CLI qui, pour une automatisation à prompt fixe, génère des variantes de promp
 - **Aucun appel payant sans accord explicite. L'utilisateur lance lui-même les runs payants** : donner la commande, ne pas l'exécuter. Un accord vaut pour ce qu'il nomme, pas pour la suite.
 - **Ne rien inventer** : aucun prix sans source ni date. Si une information manque, s'arrêter et demander.
 - Plan court d'abord quand l'utilisateur le demande, puis un commit par sujet.
+- **Demander avant toute décision qui change le périmètre.**
 
 Règles non négociables du produit :
 1. La sélection se fait sur la **borne basse** de l'intervalle de Wilson à 95 %, jamais sur la meilleure note brute.
-2. Un modèle absent du fichier de prix, ou marqué « À VÉRIFIER », bloque le lancement, même en `--dry-run`.
+2. Un modèle absent du fichier de prix, ou dont les deux tarifs valent encore « À VÉRIFIER », bloque le lancement, même en `--dry-run`. Si les tarifs sont des nombres et que seuls `date` ou `source` sont « À VÉRIFIER », le lancement continue avec un avertissement : les coûts ne sont pas fiables.
 3. Pas de clé d'API ailleurs que dans l'environnement ou un `.env` local.
 
 ## État du projet
@@ -55,7 +56,7 @@ Pièges connus :
 
 ## Décisions et raisons
 
-- **`max_tokens` reste à 500.** Des variantes à raisonnement sont tronquées, ce qui explique leurs erreurs sur Haiku. Mais ces variantes ne gagneraient pas de toute façon, et tout refaire coûterait environ 3 USD pour rien. Les réponses tronquées restent notées comme les autres.
+- **`max_tokens` reste à 500 dans le `config.yaml` local** (le défaut du code est 300). Des variantes à raisonnement sont tronquées, ce qui explique leurs erreurs sur Haiku. Mais ces variantes ne gagneraient pas de toute façon, et tout refaire coûterait environ 3 USD pour rien. Les réponses tronquées restent notées comme les autres.
 - **Modèle gratuit : tarif de référence déclaré.** Il est affiché comme « coût estimé », pas comme une économie réelle. Faute de tarif payant pour `nemotron-3.5-bolt-e4b`, on utilise celui d'un autre modèle (Super VL), en le disant dans le champ `source`. Ce choix peut décider du gagnant : on a pris un tarif prudent, qui ne favorise pas le modèle.
 - **Le seuil est une décision métier.** Le même test peut donner un autre gagnant à 70 % et à 95 %. Avec n cas de sélection, la borne basse maximale est n/(n+3,84) : 95 % demande au moins 73 cas de sélection, soit environ 100 au total.
 - **Validation :** le gagnant est confirmé si sa note brute atteint le seuil, car un petit ensemble ne permet pas à la borne basse de l'atteindre. « Indicatif » sous 20 cas, et jamais de changement de candidat.

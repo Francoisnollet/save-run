@@ -23,9 +23,10 @@ models:
     date: "À VÉRIFIER"
     source: "À VÉRIFIER"
 
-  # Modèles du premier vrai test. Tarifs volontairement NON renseignés : à remplir depuis la page de prix
-  # officielle du fournisseur (tarifs d'entrée et de sortie par million de tokens, date du relevé, URL).
-  # Tant que les tarifs sont « À VÉRIFIER », tout lancement qui utilise ces modèles est bloqué.
+  # Modèles réels, tarifs volontairement NON renseignés dans ce fichier versionné. Pour un vrai run, passez
+  # un fichier de prix local avec --prices (relevé sur la page officielle du fournisseur : tarifs d'entrée et
+  # de sortie par million de tokens, date du relevé, URL).
+  # Tant que les tarifs sont « À VÉRIFIER », tout lancement qui utilise ces modèles avec ce fichier est bloqué.
   claude-sonnet-4-5-20250929:
     input_per_million: "À VÉRIFIER"
     output_per_million: "À VÉRIFIER"
