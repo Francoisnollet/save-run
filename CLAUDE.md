@@ -23,6 +23,8 @@ Règles non négociables du produit :
 - Testée sur trois runs réels, sur une seule tâche de classification (détection d'urgence sur e-mails synthétiques) et trois modèles : deux chez Anthropic, un gratuit chez NVIDIA via `openai_compatible`.
 - Dépôt privé pour l'instant, sans remote, mais écrit comme s'il allait devenir public.
 - Résultat principal : sur ce jeu de test, plusieurs variantes atteignent presque la même note. Le choix repose donc surtout sur le coût, et le rapport le signale.
+- Quatrième run réel, sur un jeu public : Banking77, 12 intentions proches, 204 cas, seuil 90 % (`saverun-out/banking77`). Aucune variante ne démontre le seuil. 27 des 151 cas de sélection sont ratés par au moins 20 des 27 couples, souvent avec une étiquette qui semble contredire le message (non corrigée).
+- Depuis ce run : lecture tolérante du marqueur de réponse, et décompte des réponses « hors format » par variante dans le rapport. Le rapport Banking77 n'a pas encore été renoté avec la nouvelle lecture.
 
 ## Commandes
 
@@ -44,7 +46,8 @@ python tools/per_family.py saverun-out/<nom> private/<familles>.csv    # note pa
 Pièges connus :
 - `--dry-run --out <dossier>` réécrit `report.md` et `results.csv` de ce dossier, et lit un cache séparé (`runs/simulation/`). Il n'est donc ni sûr dans le dossier d'un vrai run, ni un test du vrai cache. Pour vérifier le cache : `prepare()` avec le vrai `RunStore`, sans écriture ni appel.
 - Un vrai run avec un `--out` existant remplace `report.md`, `results.csv` et `best_*`.
-- La clé de réutilisation contient modèle, hash du prompt, cas, hash de l'entrée, passage, température et `max_tokens`. Changer l'un d'eux refait, et repaie, les appels.
+- La clé de réutilisation contient modèle, hash du prompt, cas, hash de l'entrée, passage, température et `max_tokens`. Changer l'un d'eux refait, et repaie, les appels. `ANSWER_MARKER` est écrit dans les prompts : ne pas le modifier (un test le vérifie).
+- `results.csv` a une colonne `off_format_share` (après `truncated_share`), vide quand elle n'est pas calculable. Lire les colonnes de `results.csv` par leur nom, jamais par leur position.
 
 ## Conventions
 
@@ -65,6 +68,8 @@ Pièges connus :
 - **Test Banking77 : le BASE est écrit par nous**, volontairement naïf et sans définitions (il liste seulement les 12 étiquettes). Le dire dans toute publication : l'économie et l'écart de qualité sont mesurés contre ce prompt, pas contre un prompt réel d'entreprise. Les définitions des 12 étiquettes, dans l'intention, sont aussi écrites par nous.
 - **Test Banking77 : 3 messages exclus du tirage**, lus pendant la rédaction du prompt (en-tête et premières lignes de `test.csv`), tous `card_arrival` : « How do I locate my card? », « I still have not received my new card, I ordered over a week ago. », « I ordered a card but it has not arrived. Help please! ». Le tirage se fait dans une copie filtrée de `test.csv` dans `private/banking77/`. La définition de `card_arrival` a été réécrite à partir du seul nom de l'étiquette.
 - **Banking77 est public et probablement présent dans les données d'entraînement des modèles** testés (et de l'assistant qui a rédigé les définitions). À mentionner dans toute publication.
+- **Réponses « hors format »** : réponses abouties, non tronquées, illisibles une fois extraites (en `json_fields`, pas d'objet JSON avec les champs notés ; en `exact`, une valeur hors de la liste fermée des valeurs attendues, après la même normalisation que la notation, et seulement si cette liste a au plus deux fois moins de valeurs que de cas). Informatif : la note ne change pas.
+- **Toute correction de notation appliquée après un run garde l'ancien dossier de résultats.** Copier d'abord le dossier (par exemple `saverun-out/<nom>-avant-correction`), sans rien supprimer, puis renoter depuis le cache sans aucun appel. Le rapport renoté dit qu'il a été renoté, avec quelle correction.
 - **Définitions gelées dès le lancement du run.** Aucune modification de l'intention, des définitions ou du BASE après avoir vu des résultats. Si une modification s'impose, la noter (quoi, pourquoi, après quel résultat) et relancer un test neuf, dans un nouveau dossier de sortie.
 
 ## Reste à faire
@@ -74,7 +79,7 @@ Pièges connus :
 - Vérifier la limite de débit réelle de NVIDIA dans sa console : aucun chiffre officiel trouvé, `rpm` est à 30.
 - Corriger l'ancienne URL `allrun.ai` à la main dans les anciens rapports, s'ils sont partagés.
 - Revoir les critères ou l'étiquette de l'e-mail « Rendez-vous demain » : les critères d'urgence ne citent pas le lendemain, alors que l'étiquette attend `true`.
-- Tester sur un jeu public (type Banking77, 10 à 15 catégories, 150 à 200 cas) pour montrer un cas où les variantes de prompt comptent.
+- Banking77 : copier `saverun-out/banking77` vers `saverun-out/banking77-avant-correction`, puis renoter son rapport depuis le cache, sans appel, avec la lecture tolérante du marqueur.
 - Trouver un cas réel auprès d'une entreprise.
 
 ## Idées v1, ne pas coder sans accord
@@ -84,3 +89,4 @@ Pièges connus :
 - Pondération des erreurs (rater une urgence ou sur-détecter).
 - Noter toute modification d'étiquette décidée après lecture des résultats.
 - Formules ajoutées par les variantes (persona, « Lis attentivement… », « Exemples : / Entrée : / Sortie : », consigne de raisonnement, « Réponse : ») dans la langue de la configuration, au lieu du français fixe.
+- `saverun rescore` : renoter un run depuis son cache, sans aucun appel. La commande refuse de continuer s'il manque un appel, y compris de validation, n'a pas besoin de clé et ne charge pas `.env`. Elle écrit dans un nouveau dossier, ou garde une copie de l'ancien, et le rapport dit qu'il a été renoté.
