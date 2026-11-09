@@ -62,6 +62,10 @@ Pièges connus :
 - **Validation :** le gagnant est confirmé si sa note brute atteint le seuil, car un petit ensemble ne permet pas à la borne basse de l'atteindre. « Indicatif » sous 20 cas, et jamais de changement de candidat.
 - **Avertissement « le jeu de test ne discrimine pas »**, par modèle. Règle A : au moins 80 % des variantes à 98 % ou plus. Règle B : sans raisonnement, un écart d'au plus 3 points ou 1 cas, et la meilleure au seuil.
 - **Colonne `tag` purement informative :** ni dans le prompt, ni dans la clé de réutilisation, ni dans la séparation des cas, ni dans la sélection.
+- **Test Banking77 : le BASE est écrit par nous**, volontairement naïf et sans définitions (il liste seulement les 12 étiquettes). Le dire dans toute publication : l'économie et l'écart de qualité sont mesurés contre ce prompt, pas contre un prompt réel d'entreprise. Les définitions des 12 étiquettes, dans l'intention, sont aussi écrites par nous.
+- **Test Banking77 : 3 messages exclus du tirage**, lus pendant la rédaction du prompt (en-tête et premières lignes de `test.csv`), tous `card_arrival` : « How do I locate my card? », « I still have not received my new card, I ordered over a week ago. », « I ordered a card but it has not arrived. Help please! ». Le tirage se fait dans une copie filtrée de `test.csv` dans `private/banking77/`. La définition de `card_arrival` a été réécrite à partir du seul nom de l'étiquette.
+- **Banking77 est public et probablement présent dans les données d'entraînement des modèles** testés (et de l'assistant qui a rédigé les définitions). À mentionner dans toute publication.
+- **Définitions gelées dès le lancement du run.** Aucune modification de l'intention, des définitions ou du BASE après avoir vu des résultats. Si une modification s'impose, la noter (quoi, pourquoi, après quel résultat) et relancer un test neuf, dans un nouveau dossier de sortie.
 
 ## Reste à faire
 
@@ -79,3 +83,4 @@ Pièges connus :
 - Mode sans étiquettes, avec les réponses du modèle actuel comme référence.
 - Pondération des erreurs (rater une urgence ou sur-détecter).
 - Noter toute modification d'étiquette décidée après lecture des résultats.
+- Formules ajoutées par les variantes (persona, « Lis attentivement… », « Exemples : / Entrée : / Sortie : », consigne de raisonnement, « Réponse : ») dans la langue de la configuration, au lieu du français fixe.
