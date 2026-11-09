@@ -146,6 +146,32 @@ def validate_expected(expecteds: list[str], scoring: str, fields: list[str] | No
             raise ScoringError(f"Champ(s) {', '.join(missing)} absent(s) de expected : {e[:60]!r}")
 
 
+def closed_labels(expecteds: list[str], scoring: str) -> frozenset | None:
+    """exact only: the distinct expected values, normalized as scoring compares them, when they form a closed list
+    (at most half as many values as cases, as in classification). None otherwise: the shape of a free answer
+    cannot be judged."""
+    if scoring != "exact" or not expecteds:
+        return None
+    values = frozenset(_norm(e) for e in expecteds)
+    return values if len(values) <= len(expecteds) / 2 else None
+
+
+def readable(output: str, expected: str, scoring: str, fields: list[str] | None = None,
+             labels: frozenset | None = None) -> bool | None:
+    """Whether the extracted answer has the requested shape, right or wrong. None when it cannot be judged.
+
+    json_fields: a JSON object holding every scored field. exact: one of the closed list of expected values
+    (see closed_labels), after the same normalization as scoring. Informative only: it never changes a score.
+    """
+    answer = extract_answer(output)
+    if scoring == "json_fields":
+        got = parse_json_object(answer)
+        return got is not None and all(f in got for f in (fields or list(_expected_object(expected))))
+    if labels is None:
+        return None
+    return _norm(answer) in labels
+
+
 def score_output(output: str, expected: str, scoring: str, fields: list[str] | None = None) -> Score:
     if scoring == "exact":
         return Score(_norm(extract_answer(output)) == _norm(expected))

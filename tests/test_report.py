@@ -13,8 +13,9 @@ from saverun.config import load_config, parse_config
 from saverun.cost import PriceTable, load_prices
 from saverun.fake import FakeClient
 from saverun.pipeline import execute_plan, prepare
-from saverun.report import (FOOTER, SIMULATION_BANNER, economy_lines, print_summary, render_report, render_table,
-                            short_model_names, truncated_error_lines, validation_lines, verdict, write_outputs)
+from saverun.report import (FOOTER, SIMULATION_BANNER, economy_lines, off_format_lines, print_summary, render_report,
+                            render_table, short_model_names, truncated_error_lines, validation_lines, verdict,
+                            write_outputs)
 from saverun.runner import ModelRuntime, RunStore
 from saverun.scoring import variant_score
 from saverun.selection import (NOT_SEPARATED_ALL, PLUS_CHERE, RETENUE, Row, Selection, Validation, compute_economy,
@@ -172,6 +173,34 @@ def test_errors_explained_by_truncation_are_named_with_their_count():
         "Les erreurs de V01 sur m viennent surtout des troncatures (8 sur 8)."]
     assert truncated_error_lines(truncated_rows(("m", 0.023, 3, 2))) == [
         "Les erreurs de V01 sur m viennent surtout des troncatures (2 sur 3)."]
+
+
+def test_off_format_lines_name_the_variants_or_say_why_not_computed():
+    lines = off_format_lines(NS(rows=[row("V01", 1.0, 90, 100, off_format_share=0.35),
+                                      row("V02", 1.0, 90, 100, off_format_share=0.0)]))
+    assert lines[0] == ("Réponses hors format, illisibles une fois la réponse extraite (troncatures à part) : "
+                        "V01 sur m (35 %).") and "notées fausses" in lines[1]
+    assert off_format_lines(NS(rows=[row("V01", 1.0, 90, 100, off_format_share=0.0)])) == [
+        "Aucune réponse hors format (hors troncatures)."]
+    assert "non calculé" in off_format_lines(NS(rows=[row("V01", 1.0, 90, 100)]))[0]
+
+
+def test_off_format_line_names_the_five_most_affected_first():
+    rows = [row(f"V{i:02d}", 1.0, 90, 100, off_format_share=i / 100) for i in range(1, 8)]
+    line = off_format_lines(NS(rows=rows))[0]
+    assert line.index("V07") < line.index("V06") < line.index("V03")
+    assert "V02" not in line and "V01" not in line and "et 2 autre(s) couple(s)" in line
+
+
+def test_off_format_column_and_line_in_a_dry_run(tmp_path):
+    assert main(example_args(tmp_path, "--dry-run")) == 0
+    out = tmp_path / "out"
+    rows = list(csv.DictReader((out / "results.csv").open(encoding="utf-8")))
+    header = list(rows[0])
+    assert header.index("off_format_share") == header.index("truncated_share") + 1
+    assert all(r["off_format_share"] != "" for r in rows)          # 4 categories for 30 cases: a closed list
+    report = (out / "report.md").read_text(encoding="utf-8")
+    assert "hors format" in report.split("## Conditions et réserves")[1]
 
 
 def test_surtout_is_only_said_above_half_of_the_errors():

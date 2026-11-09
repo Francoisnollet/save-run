@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 from .config import Config
 from .cost import PriceTable, Savings, cost_per_1000, savings
 from .runner import MAX_FAILED_SHARE, CallResult, untested_models
-from .scoring import case_rates, max_lower_bound, score_output, variant_score
+from .scoring import case_rates, max_lower_bound, readable, score_output, variant_score
 from .splitting import UNTAGGED, Case
 from .variants import BASE_ID
 
@@ -46,6 +46,7 @@ class Row:
     note: str = ""
     wrong_answers: int = 0            # completed answers scored wrong (per answer, not per case)
     wrong_truncated: int = 0          # those that were also truncated
+    off_format_share: float | None = None  # completed, not truncated, unreadable answers; None: cannot be judged
 
     @property
     def unfair(self) -> bool:
@@ -108,11 +109,12 @@ def _scored(group: list[CallResult], expected: dict[str, str], config: Config) -
 
 
 def build_rows(results: list[CallResult], expected: dict[str, str], variants, config: Config,
-               prices: PriceTable, phase: str = "selection") -> list[Row]:
+               prices: PriceTable, phase: str = "selection", labels: frozenset | None = None) -> list[Row]:
     """One row per (model, variant): score, interval, mean tokens reported by the API, cost per 1 000 calls.
 
     Failed calls are left out of the score and of the mean tokens. A model stopped after repeated key
-    refusals is marked "non testé" and never competes.
+    refusals is marked "non testé" and never competes. `labels` is the closed list of expected values (exact
+    scoring), used only to count off-format answers; without it, exact scoring leaves that count unknown.
     """
     prices.require(sorted({r.model for r in results}))
     descriptions = {v.id: v.description for v in variants}
@@ -144,10 +146,13 @@ def build_rows(results: list[CallResult], expected: dict[str, str], variants, co
         avg_in = sum(r.tokens_in for r in done) / len(done)
         avg_out = sum(r.tokens_out for r in done) / len(done)
         wrong = [r for r in done if not score_output(r.output, expected[r.case], config.scoring, config.fields).correct]
+        shapes = [readable(r.output, expected[r.case], config.scoring, config.fields, labels)
+                  for r in done if not r.truncated]
+        off_format = None if None in shapes else sum(not s for s in shapes) / len(done)
         rows.append(Row(**base, n_cases=n, score=score, lo=lo, hi=hi, avg_in=avg_in, avg_out=avg_out,
                         cost_per_1000=cost_per_1000(avg_in, avg_out, price), failed_share=failed_share,
                         truncated_share=sum(r.truncated for r in done) / len(done), wrong_answers=len(wrong),
-                        wrong_truncated=sum(r.truncated for r in wrong)))
+                        wrong_truncated=sum(r.truncated for r in wrong), off_format_share=off_format))
     return rows
 
 

@@ -174,6 +174,44 @@ def test_tolerant_marker_with_json(reply):
     assert not score_output(reply, '{"urgent": false}', "json_fields", ["urgent"]).correct
 
 
+# --- closed list of labels and readable answers (off-format count, informative only) ------------------------------
+
+from saverun.scoring import closed_labels, readable
+
+
+def test_closed_labels_use_the_scoring_normalization():
+    assert closed_labels(["Facturation.", "facturation", " technique", "technique"], "exact") == {"facturation",
+                                                                                                  "technique"}
+    assert closed_labels(["a", "b", "c", "a"], "exact") is None             # 3 values for 4 cases: not closed
+    assert closed_labels([], "exact") is None
+    assert closed_labels(['{"urgent": true}', '{"urgent": true}'], "json_fields") is None
+
+
+@pytest.mark.parametrize("reply,shape", [
+    ("pending_transfer", True),
+    (" Pending_Transfer. ", True),                       # same normalization as scoring
+    ("failed_transfer", True),                           # wrong but readable
+    ("Réflexion.\nRéponse: **pending_transfer**", True),
+    ("The closest category is **pending_transfer**.", False),
+    ("**pending_transfer**", False),                     # bold without a marker: not read
+    ("pending_card_card_payment", False),
+])
+def test_readable_exact_needs_a_closed_list(reply, shape):
+    labels = closed_labels(["pending_transfer", "failed_transfer", "pending_transfer", "failed_transfer"], "exact")
+    assert readable(reply, "pending_transfer", "exact", None, labels) is shape
+    assert readable(reply, "pending_transfer", "exact", None, None) is None
+
+
+@pytest.mark.parametrize("reply,shape", [
+    ('{"urgent": false}', True),                         # wrong but readable
+    ('Réflexion.\nAnswer: {"urgent": true}', True),
+    ("Oui, c'est urgent.", False),
+    ('{"autre": true}', False),                          # the scored field is missing
+])
+def test_readable_json_fields(reply, shape):
+    assert readable(reply, '{"urgent": true}', "json_fields", ["urgent"]) is shape
+
+
 @pytest.mark.parametrize("reply,expected_true", [
     ('Le ton est pressant : échéance à 17h, donc {"urgent": true} est probable.\nRéponse : {"urgent": true}', True),
     ('Pas de date, simple information.\nRéponse : {"urgent": false}', False),

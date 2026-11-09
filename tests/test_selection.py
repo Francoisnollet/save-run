@@ -134,6 +134,29 @@ def test_wrong_answers_count_those_truncated_and_the_score_does_not_change():
     assert r.score == 0.5 and r.n_cases == 4 and r.truncated_share == pytest.approx(0.5)
 
 
+def test_off_format_share_counts_unreadable_answers_truncated_apart():
+    expected = {f"C{i}": "a" for i in range(6)}
+    results = [res("V01", "C0", out="a"), res("V01", "C1", out="b"),             # right, wrong but readable
+               res("V01", "C2", out="c'est a"), res("V01", "C3", out="zzz"),     # off format
+               res("V01", "C4", out="zz", truncated=True),                        # truncated: counted apart
+               res("V01", "C5", status="failed", out=None)]                       # failed: not an answer
+    (r,) = build_rows(results, expected, [V("V01")], CFG, PRICES, labels=frozenset({"a", "b"}))
+    assert r.off_format_share == pytest.approx(2 / 5) and r.truncated_share == pytest.approx(1 / 5)
+    assert r.score == pytest.approx(1 / 5)                                        # the score does not change
+    (unknown,) = build_rows(results, expected, [V("V01")], CFG, PRICES)            # exact without a closed list
+    assert unknown.off_format_share is None
+
+
+def test_off_format_share_with_json_fields():
+    cfg = parse_config({"intention": "x", "scoring": "json_fields", "fields": ["urgent"],
+                        "models": [{"id": "m", "provider": "anthropic", "api_key_env": "K", "rpm": 10}]})
+    expected = {f"C{i}": '{"urgent": true}' for i in range(4)}
+    results = [res("V01", "C0", out='{"urgent": true}'), res("V01", "C1", out='Answer: {"urgent": false}'),
+               res("V01", "C2", out="Urgent."), res("V01", "C3", out='{"urg', truncated=True)]
+    (r,) = build_rows(results, expected, [V("V01")], cfg, PRICES)
+    assert r.off_format_share == pytest.approx(1 / 4)
+
+
 def test_all_failed_and_untested_models():
     expected = {"C0": "a", "C1": "a"}
     results = ([res("V01", "C0", "failed", error="e"), res("V01", "C1", "failed", error="e")]

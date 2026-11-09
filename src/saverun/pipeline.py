@@ -13,7 +13,7 @@ from .config import Config
 from .cost import PriceTable, call_cost, estimate_tokens
 from .runner import (CallResult, Job, MaxCallsError, Preflight, RunStore, build_jobs, execute, preflight,
                      untested_models)
-from .scoring import expected_label, validate_expected
+from .scoring import closed_labels, expected_label, validate_expected
 from .selection import (Economy, Row, Selection, Validation, build_rows, compute_economy, reachability, select,
                         validate, validation_pairs)
 from .splitting import Case, Split, split_cases, tag_warnings
@@ -93,7 +93,10 @@ def execute_plan(plan: Plan, runtimes, store: RunStore, *, progress: Callable[[C
     """Run the selection phase, select, then validate the winner and its near-ties. Validation never re-selects."""
     cfg, split = plan.config, plan.split
     sel_results = execute(plan.jobs, runtimes, store, progress=progress, sleep=sleep)
-    raw_rows = build_rows(sel_results, {c.id: c.expected for c in split.selection}, plan.all_variants, cfg, plan.prices)
+    every_case = split.examples + split.selection + split.validation
+    labels = closed_labels([c.expected for c in every_case], cfg.scoring)
+    raw_rows = build_rows(sel_results, {c.id: c.expected for c in split.selection}, plan.all_variants, cfg, plan.prices,
+                          labels=labels)
     selection = select(raw_rows, cfg.seuil_qualite)
     notes: list[str] = []
 

@@ -25,13 +25,14 @@ FOOTER = "Généré avec SAVE Run (https://allrun.be)"
 
 CSV_FIELDS = ["model", "variant", "levers", "score", "ci_low", "ci_high", "n_cases", "avg_tokens_in",
               "avg_tokens_out", "cost_per_1000", "currency", "estimated_cost", "status", "failed_share",
-              "truncated_share", "simulation"]
+              "truncated_share", "off_format_share", "simulation"]
 
 
 # --- Formatting --------------------------------------------------------------------
 
 SHORT_STATUS = {PLUS_CHERE: "démontré, + chère"}   # terminal only
 TRUNCATED_ERRORS_FROM = 0.02      # from this share of truncated answers, the report says what they explain
+OFF_FORMAT_SHOWN = 5              # couples named in the off-format line, the most affected first
 
 
 def pct(x: float, digits: int = 0) -> str:
@@ -160,6 +161,22 @@ def truncated_error_lines(o: RunOutcome) -> list[str]:
     return lines
 
 
+def off_format_lines(o: RunOutcome) -> list[str]:
+    """Answers that could not be read once extracted, truncated ones apart. Scores stay as they are."""
+    answered = [r for r in o.rows if r.n_cases > 0]
+    if answered and all(r.off_format_share is None for r in answered):
+        return ["Réponses hors format : non calculé (valeurs attendues trop variées pour former une liste fermée)."]
+    off = sorted((r for r in answered if r.off_format_share), key=lambda r: (-r.off_format_share, r.model, r.variant))
+    if not off:
+        return ["Aucune réponse hors format (hors troncatures)."]
+    items = ", ".join(f"{r.variant} sur {r.model} ({pct(r.off_format_share)})" for r in off[:OFF_FORMAT_SHOWN])
+    if len(off) > OFF_FORMAT_SHOWN:
+        items += (f", et {len(off) - OFF_FORMAT_SHOWN} autre(s) couple(s) (colonne off_format_share de "
+                  "results.csv)")
+    return [f"Réponses hors format, illisibles une fois la réponse extraite (troncatures à part) : {items}.",
+            "Elles sont notées fausses : vérifiez la consigne de format, ou la façon dont le modèle écrit sa réponse."]
+
+
 def failure_lines(o: RunOutcome) -> list[str]:
     unfair = [r for r in o.rows if r.unfair]
     lines = []
@@ -187,7 +204,9 @@ def write_results_csv(path: Path, o: RunOutcome) -> None:
                 "avg_tokens_out": "" if r.avg_out is None else round(r.avg_out, 1),
                 "cost_per_1000": "" if r.cost_per_1000 is None else round(r.cost_per_1000, 6), "currency": cur,
                 "estimated_cost": r.estimated, "status": r.status, "failed_share": round(r.failed_share, 4),
-                "truncated_share": round(r.truncated_share, 4), "simulation": o.plan.dry_run})
+                "truncated_share": round(r.truncated_share, 4),
+                "off_format_share": "" if r.off_format_share is None else round(r.off_format_share, 4),
+                "simulation": o.plan.dry_run})
 
 
 # --- best_prompt.txt and best_config.json ----------------------------------------------
@@ -284,6 +303,7 @@ def render_report(o: RunOutcome, footer: bool = True) -> str:
     L += [f"- Modèle {m.id} : température : {_temperature(m)}." for m in cfg.models]
     L += [f"- {x}" for x in truncation_lines(o)]
     L += [f"- {x}" for x in truncated_error_lines(o)]
+    L += [f"- {x}" for x in off_format_lines(o)]
     L += [f"- {x}" for x in failure_lines(o)]
     L += ["", "## Prix", ""] + [f"- {x}" for x in price_notes(o)]
     caveats = [*o.plan.prices.warnings([m.id for m in cfg.models]), *o.plan.warnings, *o.notes]
@@ -377,6 +397,8 @@ def print_summary(o: RunOutcome, console: Console) -> None:
         flags += failure_lines(o)
     if any(r.truncated_share for r in o.rows):
         flags += truncation_lines(o)
+    if any(r.off_format_share for r in o.rows):
+        flags += off_format_lines(o)
     for line in flags:
         console.print(f"  ! {line}", highlight=False)
     if o.plan.dry_run:
