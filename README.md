@@ -31,7 +31,7 @@ Lecture : V20 a une note brute de 90 %, mais sa borne basse (70 %) ne démontre 
 Python 3.11 ou plus.
 
 ```bash
-git clone <url-du-dépôt> save-run
+git clone https://github.com/Francoisnollet/save-run.git save-run
 cd save-run
 pip install -e .
 ```
@@ -42,7 +42,14 @@ Premier essai, sans clé et sans dépense (faux modèle) :
 saverun run --config config.example.yaml --cases cases.example.csv --dry-run
 ```
 
-Les fichiers sont écrits dans `saverun-out/dry-run/`.
+Les fichiers sont écrits dans `saverun-out/dry-run/`. Quand il se trompe, le faux modèle répond « indéterminé », une valeur hors de la liste attendue : l'avertissement « Réponses hors format » est donc normal dans cet essai.
+
+Tests (sans réseau ni clé) :
+
+```bash
+pip install -e ".[dev]"
+python -m pytest -q
+```
 
 ## Fonctionnement
 
@@ -51,7 +58,7 @@ Les fichiers sont écrits dans `saverun-out/dry-run/`.
 À partir d'un export d'appels (CSV : `date, tache, modele, tokens_entree, tokens_sortie`), classe la dépense par tâche, projette un mois, et retient les tâches qui couvrent 80 % de la dépense.
 
 ```bash
-saverun diagnose appels.csv --prices prices.yaml
+saverun diagnose prototypes/calls.example.csv --prices prices.yaml   # export fictif fourni ; remplacez-le par le vôtre
 ```
 
 La monnaie est celle de `prices.yaml`, sans conversion. Le `--seuil-interet` (100 par défaut, dans cette monnaie, par mois) est un **défaut arbitraire** : il indique la dépense sous laquelle l'optimisation ne vaut sans doute pas le temps passé. Fixez-le selon votre offre. Un modèle absent de `prices.yaml` est compté à part, jamais valorisé à zéro.
@@ -61,6 +68,7 @@ La monnaie est celle de `prices.yaml`, sans conversion. Le `--seuil-interet` (10
 ```bash
 cp config.example.yaml config.yaml     # puis adaptez-le
 cp .env.example .env                   # puis renseignez vos clés
+cp cases.example.csv cases.csv         # puis remplacez par vos cas
 saverun run --cases cases.csv
 ```
 
@@ -94,7 +102,7 @@ Le moteur est importable (`saverun.pipeline.prepare` puis `execute_plan`), la li
 
 ## Limites connues
 
-- **Testée sur quelques runs réels seulement** : une seule tâche de classification (détection d'urgence sur e-mails synthétiques) et trois modèles. Ces runs ne disent rien des autres tâches ni des autres fournisseurs, et les situations qu'ils n'ont pas rencontrées ne sont vérifiées qu'avec de faux clients.
+- **Testée sur quelques runs réels seulement** : deux tâches de classification (détection d'urgence sur e-mails synthétiques, et intentions bancaires sur le jeu public Banking77, voir ci-dessous) et trois modèles. Ces runs ne disent rien des autres tâches ni des autres fournisseurs, et les situations qu'ils n'ont pas rencontrées ne sont vérifiées qu'avec de faux clients.
 - **Petits échantillons.** Avec peu de cas, les intervalles sont larges et le seuil peut être inatteignable (20 cas au total laissent 13 cas de sélection environ, soit une borne basse maximale d'environ 77 %). La validation sur peu de cas n'est qu'indicative. Visez 50 cas ou plus.
 - **Petits écarts indépartageables.** Sur des écarts de quelques points, 88 cas de sélection ne permettent pas de départager des variantes : 100 % donne un intervalle de 96 à 100 % et 95,5 % un intervalle de 89 à 98 %, qui se chevauchent. Un écart plus net se voit : 90,9 % donne 83 à 95 %, sans chevauchement avec 100 %.
 - **Toutes les erreurs comptent pareil.** Rater une urgence vaut autant que de la sur-détecter. Si l'une des deux erreurs vous coûte plus cher, la note ne le reflète pas.
@@ -103,6 +111,28 @@ Le moteur est importable (`saverun.pipeline.prepare` puis `execute_plan`), la li
 - **Prix à vérifier.** Les prix fournis sont des exemples fictifs. Vérifiez-les, avec leur date et leur source, avant de vous fier à un chiffre d'économie.
 - **Variantes par gabarit seulement** : quatre leviers, gabarits en français ; pas de variantes générées par un LLM, pas d'arrêt anticipé, pas d'interface web.
 - **L'économie suppose le même volume et le même type d'entrées** que vos cas de test.
+
+### Essai sur un jeu public : Banking77
+
+12 intentions proches tirées de Banking77 (6 sur les cartes, 6 sur les virements), 204 cas (3 exemples few-shot, 151 de sélection, 50 de validation), 8 variantes et le prompt de référence `BASE`, sur trois modèles : `claude-sonnet-4-5-20250929`, `claude-haiku-5-5` et `nvidia/nemotron-3.5-bolt-e4b`. Verdict selon le seuil, à partir des mêmes réponses :
+
+| Seuil | Gagnant | Sélection : note (borne basse) | Validation (50 cas) |
+|---|---|---|---|
+| 90 % | aucun : la meilleure borne basse est 72 % | – | – |
+| 70 % | V01 (sans persona ni exemples, sans raisonnement, consigne condensée) sur `claude-haiku-5-5` | 79 % (72 %) | 76 %, intervalle 63 % – 86 %, confirmé |
+| 65 % | `BASE` sur `claude-haiku-5-5` | 75 % (68 %) | 76 %, intervalle 63 % – 86 %, confirmé |
+
+Réserves :
+
+- Le prompt `BASE` est **écrit par nous**, volontairement naïf (il liste les 12 étiquettes, sans définitions). Toute économie ou tout écart de qualité est mesuré contre ce prompt, pas contre un prompt réel d'entreprise. Les définitions des 12 étiquettes, dans l'intention, sont aussi écrites par nous, et figées avant le lancement.
+- Cinq messages du jeu de test ont été lus par l'assistant de code : trois (intention `card_arrival`), en rédigeant les définitions ; ils ont servi à réécrire une définition et ont été exclus du tirage. Deux autres (même intention), affichés par erreur après la validation des définitions, n'ont pas été exclus.
+- Banking77 est public et **probablement présent dans les données d'entraînement** des modèles testés.
+- Les seuils de 70 % et 65 % ont été **choisis après avoir vu** qu'aucune variante ne démontrait 90 %. Ce ne sont pas des décisions métier.
+- « Confirmé » veut dire que la note brute de validation atteint le seuil. Sur 50 cas, l'intervalle reste large (63 % – 86 %) : la validation ne démontre pas à elle seule le seuil.
+
+Les notes ci-dessus sont celles obtenues avec la lecture tolérante du marqueur de réponse, ajoutée après le premier run : elle récupère 55 réponses justes mal lues (dont 44 pour une variante à raisonnement de Sonnet) et ne change aucun verdict.
+
+Données : Casanueva, Temčinas, Gerz, Henderson et Vulić, « Efficient Intent Detection with Dual Sentence Encoders », *NLP for ConvAI*, ACL 2020, licence CC BY 4.0. Le jeu n'est pas redistribué dans ce dépôt.
 
 ## Licence
 
