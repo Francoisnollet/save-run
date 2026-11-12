@@ -433,9 +433,11 @@ def test_readme_example_is_the_real_output_of_the_example_files(tmp_path):
     main(example_args(tmp_path, "--dry-run"))
     report = (tmp_path / "out" / "report.md").read_text(encoding="utf-8")
     verdict_line = report.split("## Verdict")[1].split("\n\n")[1].strip()
-    readme = open("README.md", encoding="utf-8").read()
+    with open("README.md", encoding="utf-8") as f:
+        readme = f.read()
     assert verdict_line in readme and SIMULATION_BANNER in readme
-    rows = {(r["variant"], r["model"]): r for r in csv.DictReader((tmp_path / "out" / "results.csv").open(encoding="utf-8"))}
+    with (tmp_path / "out" / "results.csv").open(encoding="utf-8") as f:
+        rows = {(r["variant"], r["model"]): r for r in csv.DictReader(f)}
     for key in [("V01", "modele-exemple-compatible"), ("V05", "modele-exemple-compatible"),
                 ("V08", "modele-exemple-anthropic"), ("V20", "modele-exemple-anthropic"),
                 ("BASE", "modele-exemple-anthropic")]:
