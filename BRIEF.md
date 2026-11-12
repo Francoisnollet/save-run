@@ -14,7 +14,7 @@ Un outil en ligne de commande qui, pour une automatisation à **prompt fixe**, g
 
 ## Open source et public visé
 
-SAVE Run sera publié en open source pour faire connaître son auteur (marque allrun). Le dépôt reste privé pendant la construction, mais tout doit être écrit comme s'il allait devenir public.
+SAVE Run sera publié en open source pour faire connaître son auteur (marque allrun). Le dépôt est resté privé pendant la construction, mais tout a été écrit comme s'il allait devenir public.
 
 - **Public principal** : équipes avec une automatisation à prompt fixe. **Public secondaire** : développeurs qui ont des appels LLM dans leur produit (classer, extraire, router). Pas les développeurs qui utilisent un agent pour coder : leurs prompts ne sont pas fixes.
 - **Positionnement face aux outils connus** (Promptfoo, DSPy, etc.) : SAVE Run ne se présente pas comme un comparateur de prompts. Il rend une **décision** : le couple le moins cher qui démontre le seuil, avec intervalle de confiance et économie chiffrée. Le README le dit dès les premières lignes.
