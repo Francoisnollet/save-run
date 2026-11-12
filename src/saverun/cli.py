@@ -11,7 +11,7 @@ from . import __version__
 from .config import ConfigError, load_config, load_dotenv
 from .cost import PriceError, load_prices
 from .diagnose import (DEFAULT_COVERAGE, DEFAULT_INTEREST_THRESHOLD, DiagnoseError, diagnose, write_csv)
-from .pipeline import Plan, execute_plan, prepare
+from .pipeline import Plan, ValidationQuote, execute_plan, prepare
 from .report import SIMULATION_BANNER, num, pct, print_summary, write_outputs
 from .runner import MaxCallsError, MissingKeyError, RunStore, build_runtimes
 from .scoring import ScoringError
@@ -95,6 +95,14 @@ def _print_plan(plan: Plan, console: Console) -> None:
         console.print(f"! {w}", highlight=False)
 
 
+def _yes(question: str) -> bool:
+    """Only an explicit « o » goes ahead; a closed input (EOF) is a refusal."""
+    try:
+        return input(question).strip().lower() == "o"
+    except EOFError:
+        return False
+
+
 def cmd_run(args: argparse.Namespace, console: Console) -> int:
     load_dotenv(args.env)
     config = load_config(args.config)
@@ -111,10 +119,26 @@ def cmd_run(args: argparse.Namespace, console: Console) -> int:
                               seed=args.seed)  # checks every API key before anything starts
     _print_plan(plan, console)
 
-    if not args.dry_run and not args.yes and plan.preflight.new_calls:
-        if input("Lancer ? Ces appels sont payants. [o/N] ").strip().lower() != "o":
+    ask = not args.dry_run and not args.yes
+    if ask and plan.preflight.new_calls:
+        if not _yes("Lancer ? Ces appels sont payants. [o/N] "):
             console.print("Annulé.")
             return 1
+
+    def confirm_validation(quotes: list[ValidationQuote]) -> bool:
+        cur = plan.prices.currency
+        todo = [q for q in quotes if q.new_calls]
+        console.print("\nValidation sur les cas mis de côté (le gagnant reste celui de la sélection) :", highlight=False)
+        for q in todo:
+            console.print(f"  {q.variant} sur {q.model} ({'gagnant' if q.is_winner else 'quasi-égal'}) : "
+                          f"{q.new_calls} appels, coût maximum estimé {num(q.max_cost)} {cur}"
+                          f"{' (tarif de référence)' if q.estimated else ''}", highlight=False)
+        for q in quotes:
+            if not q.new_calls:
+                console.print(f"  {q.variant} sur {q.model} : déjà en cache, aucun appel.", highlight=False)
+        console.print(f"  Total : {sum(q.new_calls for q in todo)} appels, coût maximum estimé "
+                      f"{num(sum(q.max_cost for q in todo))} {cur}.", highlight=False)
+        return _yes("Lancer la validation ? Ces appels sont payants. [o/N] ")
 
     done = [0]
 
@@ -124,7 +148,8 @@ def cmd_run(args: argparse.Namespace, console: Console) -> int:
             console.print(f"  … {done[0]} appels traités", highlight=False)
 
     try:
-        outcome = execute_plan(plan, runtimes, store, progress=progress)
+        outcome = execute_plan(plan, runtimes, store, progress=progress,
+                               confirm_validation=confirm_validation if ask else None)
     except KeyboardInterrupt:
         console.print("Interrompu. Les appels déjà faits sont dans runs/ : relancez pour reprendre sans les repayer.")
         return 130

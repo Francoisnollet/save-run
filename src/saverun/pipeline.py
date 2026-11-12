@@ -40,6 +40,21 @@ class Plan:
         return self.variants + ([self.base] if self.base else [])
 
 
+@dataclass(frozen=True)
+class ValidationQuote:
+    """What validating one candidate would still cost: calls missing from the store, priced at its own model."""
+    model: str
+    variant: str
+    is_winner: bool
+    new_calls: int
+    max_cost: float                   # upper estimate, in the price file's currency
+    estimated: bool                   # free model priced at its reference tariff
+
+
+VALIDATION_DECLINED = ("Validation refusée avant les appels payants : {n} appel(s) non faits, les candidats "
+                       "concernés ne sont pas validés. Relancez pour la faire : la sélection est reprise du cache.")
+
+
 @dataclass
 class RunOutcome:
     plan: Plan
@@ -88,9 +103,28 @@ def prepare(config: Config, cases: list[Case], prices: PriceTable, store: RunSto
                 dry_run=dry_run)
 
 
+def validation_quotes(plan: Plan, pairs: list[tuple[str, str]], store: RunStore,
+                      winner: tuple[str, str] | None = None) -> list[ValidationQuote]:
+    """For each candidate, the validation calls not yet in the store and their maximum cost at its model's price."""
+    cfg, done = plan.config, store.load_ok()
+    quotes = []
+    for model, variant in pairs:
+        price = plan.prices.models[model]
+        pending = [j for j in build_jobs(plan.all_variants, cfg, plan.split.validation, "validation",
+                                         [(model, variant)]) if j.key not in done]
+        cost = sum(call_cost(estimate_tokens(j.system + j.input), cfg.max_tokens, price) for j in pending)
+        quotes.append(ValidationQuote(model, variant, (model, variant) == winner, len(pending), cost, price.free))
+    return quotes
+
+
 def execute_plan(plan: Plan, runtimes, store: RunStore, *, progress: Callable[[CallResult], None] | None = None,
-                 sleep: Callable[[float], None] = time.sleep) -> RunOutcome:
-    """Run the selection phase, select, then validate the winner and its near-ties. Validation never re-selects."""
+                 sleep: Callable[[float], None] = time.sleep,
+                 confirm_validation: Callable[[list[ValidationQuote]], bool] | None = None) -> RunOutcome:
+    """Run the selection phase, select, then validate the winner and its near-ties. Validation never re-selects.
+
+    `confirm_validation`, when given, is asked before any validation call that is not already in the store. If it
+    declines, only fully cached candidates are validated (none, unless the winner is one of them).
+    """
     cfg, split = plan.config, plan.split
     sel_results = execute(plan.jobs, runtimes, store, progress=progress, sleep=sleep)
     every_case = split.examples + split.selection + split.validation
@@ -101,12 +135,23 @@ def execute_plan(plan: Plan, runtimes, store: RunStore, *, progress: Callable[[C
     notes: list[str] = []
 
     pairs = _affordable_pairs(plan, selection, store, notes)
+    declined = False
+    if pairs and confirm_validation is not None:
+        winner = (selection.winner.model, selection.winner.variant)
+        quotes = validation_quotes(plan, pairs, store, winner)
+        if any(q.new_calls for q in quotes) and not confirm_validation(quotes):
+            declined = True
+            pairs = [(q.model, q.variant) for q in quotes if q.new_calls == 0]
+            notes.append(VALIDATION_DECLINED.format(n=sum(q.new_calls for q in quotes)))
     val_results: list[CallResult] = []
     if pairs:
         jobs = build_jobs(plan.all_variants, cfg, split.validation, "validation", pairs)
         val_results = execute(jobs, runtimes, store, progress=progress, sleep=sleep)
     validations = validate(val_results, {c.id: c.expected for c in split.validation}, selection, cfg)
-    if selection.winner and not validations:
+    if declined:  # report only what was actually validated; without the winner, nothing is
+        kept = [v for v in validations if (v.model, v.variant) in pairs]
+        validations = kept if any(v.is_winner for v in kept) else []
+    if selection.winner and not validations and not declined:
         notes.append("La validation n'a pas pu être exécutée : le gagnant reste « non confirmé ».")
 
     return RunOutcome(plan, sel_results, val_results, selection.rows, selection, validations,

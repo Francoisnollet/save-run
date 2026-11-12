@@ -49,6 +49,7 @@ python tools/per_family.py saverun-out/<nom> private/<familles>.csv    # note pa
 Pièges connus :
 - `--dry-run --out <dossier>` réécrit `report.md` et `results.csv` de ce dossier, et lit un cache séparé (`runs/simulation/`). Il n'est donc ni sûr dans le dossier d'un vrai run, ni un test du vrai cache. Pour vérifier le cache : `prepare()` avec le vrai `RunStore`, sans écriture ni appel.
 - Un vrai run avec un `--out` existant remplace `report.md`, `results.csv` et `best_*`.
+- Un vrai run pose deux questions : avant les appels de sélection, puis avant les appels de validation absents du cache (même si la sélection est entièrement en cache). Un refus de la validation écrit quand même le rapport, gagnant « non confirmé ». `--yes` ne pose aucune des deux.
 - La clé de réutilisation contient modèle, hash du prompt, cas, hash de l'entrée, passage, température et `max_tokens`. Changer l'un d'eux refait, et repaie, les appels. `ANSWER_MARKER` est écrit dans les prompts : ne pas le modifier (un test le vérifie).
 - `results.csv` a une colonne `off_format_share` (après `truncated_share`), vide quand elle n'est pas calculable. Lire les colonnes de `results.csv` par leur nom, jamais par leur position.
 

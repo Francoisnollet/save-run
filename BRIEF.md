@@ -106,7 +106,7 @@ SAVE Run sera publié en open source pour faire connaître son auteur (marque al
 
 - Python 3.11 ou plus. Dépendances minimales : `anthropic`, `openai`, `pyyaml`, `rich`. Pas de framework d'orchestration.
 - **Moteur séparé de la ligne de commande** : logique importable, CLI dans un fichier à part.
-- Avant de lancer : afficher le nombre d'appels et un coût maximum estimé, demander confirmation, respecter `max_calls`.
+- Avant de lancer : afficher le nombre d'appels et un coût maximum estimé, demander confirmation, respecter `max_calls`. Demander à nouveau avant les appels de validation qui ne sont pas en cache, même quand la sélection n'a rien à appeler : coût maximum par candidat, au prix de son modèle. Un refus écrit le rapport, gagnant « non confirmé ». `--yes` supprime les deux questions ; une entrée fermée vaut un refus.
 - `--dry-run` avec faux modèle reproductible (option `--seed`) : tout le pipeline sans dépenser.
 - Sorties brutes dans `runs/` pour pouvoir renoter sans réappeler l'API.
 - Langue : messages, rapport et README en français ; code, commentaires et noms en anglais.

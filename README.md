@@ -74,7 +74,7 @@ saverun run --cases cases.csv
 
 1. Les cas (`cases.csv`, colonnes `input,expected`, et `tag` en option) sont séparés **avant toute exécution** (graine fixée) : 3 exemples few-shot, un ensemble de sélection, un ensemble de validation. Un cas n'est jamais dans deux ensembles. **Visez 50 cas** ; en dessous de 20, le résultat est indicatif.
 2. Variantes par gabarit : persona (dont un témoin « aucun »), 0 ou 3 exemples, raisonnement, consigne condensée. Le tirage est équilibré (au moins la moitié des variantes sans raisonnement) et les exemples couvrent chaque valeur attendue quand c'est possible. Votre `base_prompt`, s'il est fourni, est testé comme variante de référence `BASE`.
-3. Avant tout appel, SAVE Run affiche le nombre d'appels, un coût maximum estimé et la borne basse maximale atteignable avec vos cas, puis demande confirmation. `max_calls` est respecté.
+3. Avant tout appel, SAVE Run affiche le nombre d'appels, un coût maximum estimé et la borne basse maximale atteignable avec vos cas, puis demande confirmation. Il redemande avant les appels de validation qui ne sont pas déjà faits, avec un coût maximum par candidat, même quand la sélection est entièrement reprise du cache. `max_calls` est respecté.
 4. Notation déterministe (`exact` ou `json_fields`), puis note de chaque variante avec un intervalle de Wilson à 95 %. **L'unité statistique est le cas** : l'intervalle ne se resserre qu'avec plus de cas, pas avec `runs_per_case`.
 5. Sélection : la moins chère dont la **borne basse** atteint le seuil. Les variantes qui le démontrent aussi, à moins de 10 % du coût de la retenue, sont signalées « quasi à égalité ».
 6. Validation du gagnant et de ses quasi-égaux sur les cas mis de côté. Le gagnant est « confirmé » si sa **note brute** y atteint le seuil (un petit ensemble ne permet pas à la borne basse de l'atteindre ; l'intervalle est affiché quand même, et « indicatif » sous 20 cas). Sinon, le rapport dit « non confirmée » : aucun autre candidat n'est substitué, ce serait re-sélectionner sur la validation.
@@ -83,7 +83,7 @@ Fichiers produits dans `saverun-out/` : `results.csv` (une ligne par variante et
 
 La colonne `tag` (par exemple une famille de cas) ajoute au rapport une section « Note par tag ». Elle est informative : le tag n'est jamais envoyé au modèle, ne change ni la séparation des cas ni la sélection, et un avertissement signale un tag avec moins de 10 cas de sélection. Sans cette colonne, rien ne change. `tools/make_cases.py` accepte un fichier à 2 ou 3 colonnes (texte, oui/non, tag).
 
-Options utiles : `--dry-run` (faux modèle, reproductible avec `--seed`), `--yes` (sans confirmation), `--out`, `--no-footer`.
+Options utiles : `--dry-run` (faux modèle, reproductible avec `--seed`), `--yes` (sans confirmation, ni avant la sélection ni avant la validation), `--out`, `--no-footer`.
 
 ### Choisir le seuil
 
