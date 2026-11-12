@@ -443,7 +443,7 @@ def test_readme_example_is_the_real_output_of_the_example_files(tmp_path):
                 ("BASE", "modele-exemple-anthropic")]:
         r = rows[key]
         cost = f"{float(r['cost_per_1000']):.3f}".replace(".", ",")
-        assert f"| {cost}" in readme or f"{cost} \*" in readme, key
+        assert f"| {cost}" in readme or rf"{cost} \*" in readme, key
     assert rows[("V08", "modele-exemple-anthropic")]["status"] == "retenue"
     assert rows[("BASE", "modele-exemple-anthropic")]["status"] == "seuil démontré, plus chère"
 
