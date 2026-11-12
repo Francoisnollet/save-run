@@ -58,7 +58,7 @@ Pièges connus :
 - Tests avec de faux clients, jamais d'appel réel. Ils passent `--env` vers un fichier inexistant de `tmp_path`.
 - Le README contient un exemple généré par le faux modèle, vérifié par un test : à régénérer s'il dérive.
 - Utilitaires hors paquet dans `tools/`. `.gitattributes` force les fins de ligne LF.
-- Données réelles dans `private/` ou `data/`, sorties dans `saverun-out/` : ces dossiers, `.env`, `config.yaml`, `cases.csv` et `NOTES.local.md` sont ignorés par git.
+- Données réelles dans `private/` ou `data/`, sorties dans `saverun-out/` : ces dossiers, `.env`, `config.yaml`, `cases.csv` et les notes locales sont ignorés par git.
 
 ## Décisions et raisons
 
@@ -69,7 +69,7 @@ Pièges connus :
 - **Avertissement « le jeu de test ne discrimine pas »**, par modèle. Règle A : au moins 80 % des variantes à 98 % ou plus. Règle B : sans raisonnement, un écart d'au plus 3 points ou 1 cas, et la meilleure au seuil.
 - **Colonne `tag` purement informative :** ni dans le prompt, ni dans la clé de réutilisation, ni dans la séparation des cas, ni dans la sélection.
 - **Test Banking77 : le BASE est écrit par nous**, volontairement naïf et sans définitions (il liste seulement les 12 étiquettes). Le dire dans toute publication : l'économie et l'écart de qualité sont mesurés contre ce prompt, pas contre un prompt réel d'entreprise. Les définitions des 12 étiquettes, dans l'intention, sont aussi écrites par nous.
-- **Test Banking77 : 3 messages exclus du tirage**, lus pendant la rédaction du prompt (en-tête et premières lignes de `test.csv`), tous `card_arrival` : « How do I locate my card? », « I still have not received my new card, I ordered over a week ago. », « I ordered a card but it has not arrived. Help please! ». Le tirage se fait dans une copie filtrée de `test.csv` dans `private/banking77/`. La définition de `card_arrival` a été réécrite à partir du seul nom de l'étiquette.
+- **Test Banking77 : 3 messages exclus du tirage**, lus pendant la rédaction du prompt (en-tête et premières lignes de `test.csv`), tous `card_arrival` : « How do I locate my card? », « I still have not received my new card, I ordered over a week ago. », « I ordered a card but it has not arrived. Help please! ». Le tirage se fait dans une copie filtrée de `test.csv` dans `private/banking77/`. La définition de `card_arrival` a été réécrite à partir du seul nom de l'étiquette. Source des messages : Banking77, Casanueva, Temčinas, Gerz, Henderson et Vulić, « Efficient Intent Detection with Dual Sentence Encoders », NLP for ConvAI, ACL 2020, licence CC BY 4.0.
 - **Banking77 est public et probablement présent dans les données d'entraînement des modèles** testés (et de l'assistant qui a rédigé les définitions). À mentionner dans toute publication.
 - **Réponses « hors format »** : réponses abouties, non tronquées, illisibles une fois extraites (en `json_fields`, pas d'objet JSON avec les champs notés ; en `exact`, une valeur hors de la liste fermée des valeurs attendues, après la même normalisation que la notation, et seulement si cette liste a au plus deux fois moins de valeurs que de cas). Informatif : la note ne change pas.
 - **Toute correction de notation appliquée après un run garde l'ancien dossier de résultats.** Copier d'abord le dossier (par exemple `saverun-out/<nom>-avant-correction`), sans rien supprimer, puis renoter depuis le cache sans aucun appel. Le rapport renoté dit qu'il a été renoté, avec quelle correction.
@@ -77,12 +77,8 @@ Pièges connus :
 
 ## Reste à faire
 
-- Avant toute publication, et seulement à la demande de l'utilisateur : le nettoyage de l'historique local décrit dans `NOTES.local.md`.
-- Remplacer `<url-du-dépôt>` dans le README au moment de publier.
 - Vérifier la limite de débit réelle de NVIDIA dans sa console : aucun chiffre officiel trouvé, `rpm` est à 30.
-- Corriger l'ancienne URL `allrun.ai` à la main dans les anciens rapports, s'ils sont partagés.
 - Revoir les critères ou l'étiquette de l'e-mail « Rendez-vous demain » : les critères d'urgence ne citent pas le lendemain, alors que l'étiquette attend `true`.
-- Trouver un cas réel auprès d'une entreprise.
 
 ## Idées v1, ne pas coder sans accord
 
