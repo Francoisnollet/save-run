@@ -24,7 +24,10 @@ Règles non négociables du produit :
 - Dépôt privé pour l'instant, sans remote, mais écrit comme s'il allait devenir public.
 - Résultat principal : sur ce jeu de test, plusieurs variantes atteignent presque la même note. Le choix repose donc surtout sur le coût, et le rapport le signale.
 - Quatrième run réel, sur un jeu public : Banking77, 12 intentions proches, 204 cas, seuil 90 % (`saverun-out/banking77`). Aucune variante ne démontre le seuil. 27 des 151 cas de sélection sont ratés par au moins 20 des 27 couples, souvent avec une étiquette qui semble contredire le message (non corrigée).
-- Depuis ce run : lecture tolérante du marqueur de réponse, et décompte des réponses « hors format » par variante dans le rapport. Le rapport Banking77 n'a pas encore été renoté avec la nouvelle lecture.
+- Depuis ce run : lecture tolérante du marqueur de réponse, et décompte des réponses « hors format » par variante dans le rapport.
+- Banking77 selon le seuil, avec la lecture tolérante : à 0,90 aucune variante n'est retenue ; à 0,70, V01 sur Haiku, confirmé en validation (38/50) ; à 0,65, BASE sur Haiku, confirmé en validation (38/50). Validation des deux seuils : 150 appels Haiku, coût réel 0,011 USD, sélection entièrement reprise du cache.
+- Dossiers : `saverun-out/banking77` (rapport renoté, seuil 0,90), `banking77-avant-correction` (rapport d'origine), `banking77-seuil70` et `banking77-seuil65`.
+- À dire avec ces résultats : les seuils 0,70 et 0,65 ont été choisis après avoir vu les résultats ; le BASE est un prompt naïf écrit par nous ; « confirmé » veut dire « note brute de validation ≥ seuil », pas « seuil démontré » : sur 50 cas, l'intervalle est 63–86 %, borne basse sous 70 %, et la validation ne démontre pas à elle seule le seuil.
 
 ## Commandes
 
@@ -79,7 +82,6 @@ Pièges connus :
 - Vérifier la limite de débit réelle de NVIDIA dans sa console : aucun chiffre officiel trouvé, `rpm` est à 30.
 - Corriger l'ancienne URL `allrun.ai` à la main dans les anciens rapports, s'ils sont partagés.
 - Revoir les critères ou l'étiquette de l'e-mail « Rendez-vous demain » : les critères d'urgence ne citent pas le lendemain, alors que l'étiquette attend `true`.
-- Banking77 : copier `saverun-out/banking77` vers `saverun-out/banking77-avant-correction`, puis renoter son rapport depuis le cache, sans appel, avec la lecture tolérante du marqueur.
 - Trouver un cas réel auprès d'une entreprise.
 
 ## Idées v1, ne pas coder sans accord
