@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,9 +7,15 @@ name = "saverun"
 version = "0.1.0"
 description = "Trouve le couple prompt x modèle le moins cher qui démontre un seuil de qualité."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "François Nollet" }]
 requires-python = ">=3.11"
 dependencies = ["anthropic", "openai", "pyyaml", "rich"]
+
+[project.urls]
+Homepage = "https://github.com/Francoisnollet/save-run"
+Issues = "https://github.com/Francoisnollet/save-run/issues"
 
 [project.optional-dependencies]
 dev = ["pytest"]
