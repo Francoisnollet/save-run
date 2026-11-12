@@ -1,3 +1,5 @@
+English version: [README.en.md](README.en.md)
+
 # SAVE Run
 
 *Savings Against Value Erosion.* Vous avez une automatisation à prompt fixe (classer, extraire, router) qui appelle un modèle de langage à fort volume. SAVE Run ne se présente pas comme un comparateur de prompts : il rend une **décision**.
