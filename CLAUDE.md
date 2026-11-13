@@ -20,8 +20,9 @@ Règles non négociables du produit :
 ## État du projet
 
 - v0 fonctionnelle : `saverun run`, `saverun diagnose`, `--dry-run` avec faux modèle.
-- Testée sur trois runs réels, sur une seule tâche de classification (détection d'urgence sur e-mails synthétiques) et trois modèles : deux chez Anthropic, un gratuit chez NVIDIA via `openai_compatible`.
-- Dépôt privé pour l'instant, sans remote, mais écrit comme s'il allait devenir public.
+- Testée sur quelques runs réels, sur deux tâches de classification (détection d'urgence sur e-mails synthétiques, et intentions bancaires sur le jeu public Banking77) et trois modèles : deux chez Anthropic, un gratuit chez NVIDIA via `openai_compatible`.
+- Dépôt public depuis le 2026-11-13 : https://github.com/Francoisnollet/save-run, branche `main` seule (publiée jusqu'à `fd0c6f1`). README en français (`README.md`) et en anglais (`README.en.md`).
+- Confirmation demandée avant les appels de validation payants, avec un coût maximum par candidat au prix de son modèle. 363 tests.
 - Résultat principal : sur ce jeu de test, plusieurs variantes atteignent presque la même note. Le choix repose donc surtout sur le coût, et le rapport le signale.
 - Quatrième run réel, sur un jeu public : Banking77, 12 intentions proches, 204 cas, seuil 90 % (`saverun-out/banking77`). Aucune variante ne démontre le seuil. 27 des 151 cas de sélection sont ratés par au moins 20 des 27 couples, souvent avec une étiquette qui semble contredire le message (non corrigée).
 - Depuis ce run : lecture tolérante du marqueur de réponse, et décompte des réponses « hors format » par variante dans le rapport.
@@ -81,6 +82,9 @@ Pièges connus :
 
 - Vérifier la limite de débit réelle de NVIDIA dans sa console : aucun chiffre officiel trouvé, `rpm` est à 30.
 - Revoir les critères ou l'étiquette de l'e-mail « Rendez-vous demain » : les critères d'urgence ne citent pas le lendemain, alors que l'étiquette attend `true`.
+- Réserver le nom du paquet (`saverun`) sur PyPI.
+- Nettoyage local de l'ancienne adresse e-mail (détail dans les notes locales) : seulement à la demande de l'utilisateur, et jamais en poussant autre chose que `main`.
+- Trouver un cas réel à fort volume.
 
 ## Idées v1, ne pas coder sans accord
 
