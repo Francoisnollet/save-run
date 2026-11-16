@@ -29,6 +29,7 @@ saverun-out/
 
 # Notes personnelles, propres à cette machine
 NOTES.local.md
+CLAUDE.local.md
 
 # Données réelles (e-mails anonymisés) : ne jamais versionner
 data/

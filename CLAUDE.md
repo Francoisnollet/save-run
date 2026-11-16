@@ -4,10 +4,7 @@ CLI qui, pour une automatisation à prompt fixe, génère des variantes de promp
 
 ## Règles permanentes
 
-- **Aucune suppression sans demander**, ni fichier ni dossier, et jamais de `rm -rf` dans le projet. Les essais se font dans un dossier temporaire hors du projet.
-- **Ne jamais lire ni afficher `.env`.** Pour savoir si une clé est là, répondre seulement « présente » ou « absente ». Aucune clé dans le code, les journaux ou les fichiers de sortie.
-- **Aucun push.**
-- **Aucun appel payant sans accord explicite. L'utilisateur lance lui-même les runs payants** : donner la commande, ne pas l'exécuter. Un accord vaut pour ce qu'il nomme, pas pour la suite.
+- **Aucune clé** dans le code, les journaux ou les fichiers de sortie.
 - **Ne rien inventer** : aucun prix sans source ni date. Si une information manque, s'arrêter et demander.
 - Plan court d'abord quand l'utilisateur le demande, puis un commit par sujet.
 - **Demander avant toute décision qui change le périmètre.**
@@ -82,8 +79,6 @@ Pièges connus :
 
 - Vérifier la limite de débit réelle de NVIDIA dans sa console : aucun chiffre officiel trouvé, `rpm` est à 30.
 - Revoir les critères ou l'étiquette de l'e-mail « Rendez-vous demain » : les critères d'urgence ne citent pas le lendemain, alors que l'étiquette attend `true`.
-- Réserver le nom du paquet (`saverun`) sur PyPI.
-- Nettoyage local de l'ancienne adresse e-mail (détail dans les notes locales) : seulement à la demande de l'utilisateur, et jamais en poussant autre chose que `main`.
 - Trouver un cas réel à fort volume.
 
 ## Idées v1, ne pas coder sans accord
