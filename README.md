@@ -26,7 +26,7 @@ Bonnes candidates : prompt fixe, volume élevé, sortie vérifiable automatiquem
 
 \* modèle gratuit valorisé à un tarif de référence : coût estimé. Extrait de 5 lignes sur 42.
 
-Lecture : V20 a une note brute de 90 %, mais sa borne basse (70 %) ne démontre pas le seuil de 75 % ; V08 le démontre, et c'est la moins chère à le faire. Le prompt actuel (`BASE`) le démontre aussi, mais coûte plus. Le rapport complet (`report.md`) détaille l'économie par rapport au prompt actuel, la validation et les réserves.
+Lecture : V20 a une note brute de 90 %, mais sa borne basse (70 %) ne démontre pas le seuil de 75 % ; V08 le démontre, et c'est la moins chère à le faire. Le prompt actuel (`BASE`) le démontre aussi, mais coûte plus. Le rapport complet (`report.md`) détaille l'économie et la comparaison cas par cas avec le prompt actuel, la validation et les réserves.
 
 ## Installation
 
@@ -74,14 +74,14 @@ cp cases.example.csv cases.csv         # puis remplacez par vos cas
 saverun run --cases cases.csv
 ```
 
-1. Les cas (`cases.csv`, colonnes `input,expected`, et `tag` en option) sont séparés **avant toute exécution** (graine fixée) : 3 exemples few-shot, un ensemble de sélection, un ensemble de validation. Un cas n'est jamais dans deux ensembles. **Visez 50 cas** ; en dessous de 20, le résultat est indicatif.
+1. Les cas (`cases.csv`, colonnes `input,expected`, et `tag` et `critical` en option) sont séparés **avant toute exécution** (graine fixée) : 3 exemples few-shot, un ensemble de sélection, un ensemble de validation. Un cas n'est jamais dans deux ensembles. **Visez 50 cas** ; en dessous de 20, le résultat est indicatif.
 2. Variantes par gabarit : persona (dont un témoin « aucun »), 0 ou 3 exemples, raisonnement, consigne condensée. Le tirage est équilibré (au moins la moitié des variantes sans raisonnement) et les exemples couvrent chaque valeur attendue quand c'est possible. Votre `base_prompt`, s'il est fourni, est testé comme variante de référence `BASE`.
-3. Avant tout appel, SAVE Run affiche le nombre d'appels, un coût maximum estimé et la borne basse maximale atteignable avec vos cas, puis demande confirmation. Il redemande avant les appels de validation qui ne sont pas déjà faits, avec un coût maximum par candidat, même quand la sélection est entièrement reprise du cache. `max_calls` est respecté.
+3. Avant tout appel, SAVE Run affiche le nombre d'appels, un coût maximum estimé et la borne basse maximale atteignable avec vos cas, puis demande confirmation. Il redemande avant les appels de validation qui ne sont pas déjà faits, avec un coût maximum par candidat, même quand la sélection est entièrement reprise du cache. Avec des cas critiques en validation, ce devis a une ligne de plus : le prompt actuel exécuté sur ces cas (voir [Cas critiques](#cas-critiques-et-comparaison-avec-le-prompt-actuel)). `max_calls` est respecté, ces appels compris.
 4. Notation déterministe (`exact` ou `json_fields`), puis note de chaque variante avec un intervalle de Wilson à 95 %. **L'unité statistique est le cas** : l'intervalle ne se resserre qu'avec plus de cas, pas avec `runs_per_case`.
-5. Sélection : la moins chère dont la **borne basse** atteint le seuil. Les variantes qui le démontrent aussi, à moins de 10 % du coût de la retenue, sont signalées « quasi à égalité ».
-6. Validation du gagnant et de ses quasi-égaux sur les cas mis de côté. Le gagnant est « confirmé » si sa **note brute** y atteint le seuil (un petit ensemble ne permet pas à la borne basse de l'atteindre ; l'intervalle est affiché quand même, et « indicatif » sous 20 cas). Sinon, le rapport dit « non confirmée » : aucun autre candidat n'est substitué, ce serait re-sélectionner sur la validation.
+5. Sélection : la moins chère dont la **borne basse** atteint le seuil. Les variantes qui le démontrent aussi, à moins de 10 % du coût de la retenue, sont signalées « quasi à égalité ». Statuts possibles : « retenue », « quasi à égalité », « seuil démontré, plus chère », « sous le seuil », « casse un cas critique » (voir [Cas critiques](#cas-critiques-et-comparaison-avec-le-prompt-actuel)), « non testé » (modèle arrêté) et « aucun appel abouti ».
+6. Validation du gagnant et de ses quasi-égaux sur les cas mis de côté. Le gagnant est « confirmé » si sa **note brute** y atteint le seuil (un petit ensemble ne permet pas à la borne basse de l'atteindre ; l'intervalle est affiché quand même, et « indicatif » sous 20 cas) et, s'il y a des cas critiques en validation, s'il n'en casse pas plus que la tolérance. Sinon, le rapport dit « non confirmée » : aucun autre candidat n'est substitué, ce serait re-sélectionner sur la validation.
 
-Fichiers produits dans `saverun-out/` : `results.csv` (une ligne par variante et par modèle, lisible par machine), `report.md` (assez propre pour être partagé tel quel ; `--no-footer` retire la ligne finale), `best_prompt.txt` et `best_config.json` (modèle, paramètres, exemples inclus), et `runs/` (sorties brutes : une relance ne repaie pas les appels déjà réussis).
+Fichiers produits dans `saverun-out/` : `results.csv` (une ligne par variante et par modèle, lisible par machine), `comparison.csv` (comparaison cas par cas avec le prompt actuel, quand il y a une référence), `report.md` (assez propre pour être partagé tel quel ; `--no-footer` retire la ligne finale), `best_prompt.txt` et `best_config.json` (modèle, paramètres, exemples inclus), et `runs/` (sorties brutes : une relance ne repaie pas les appels déjà réussis).
 
 La colonne `tag` (par exemple une famille de cas) ajoute au rapport une section « Note par tag ». Elle est informative : le tag n'est jamais envoyé au modèle, ne change ni la séparation des cas ni la sélection, et un avertissement signale un tag avec moins de 10 cas de sélection. Sans cette colonne, rien ne change. `tools/make_cases.py` accepte un fichier à 2 ou 3 colonnes (texte, oui/non, tag).
 
@@ -92,6 +92,25 @@ Options utiles : `--dry-run` (faux modèle, reproductible avec `--seed`), `--yes
 Le seuil de qualité (`seuil_qualite`) est une **décision métier** : le même test peut donner un autre gagnant à 70 % et à 95 %, car un seuil plus exigeant écarte des couples moins chers.
 
 Il dépend aussi du nombre de cas. Avec n cas de sélection, la borne basse maximale, atteinte avec une note de 100 %, est n/(n+3,84). Un seuil de 95 % demande donc au moins 73 cas de sélection, soit environ 100 cas au total avec `validation_part` à 0,25 et les 3 exemples few-shot.
+
+### Cas critiques et comparaison avec le prompt actuel
+
+Une bonne note moyenne peut cacher des cas que le prompt actuel réussissait et qu'une variante moins chère rate. Avec `base_prompt` et `current_model`, SAVE Run compare donc chaque variante au prompt actuel, cas par cas, et vous pouvez marquer les cas qui ne doivent pas être cassés.
+
+- **Référence** : `BASE` sur `current_model`, la même que pour l'économie. Sans l'un des deux, aucune comparaison n'est faite et le rapport dit pourquoi.
+- **Section « Par rapport au prompt actuel »** de `report.md` et fichier `comparison.csv` : pour chaque variante, les régressions (cas réussis par la référence, ratés par la variante), les corrections, les échecs communs et les cas non vérifiés, sur les cas de sélection. `comparison.csv` donne le détail cas par cas, et `results.csv` les mêmes comptes en colonnes. Les deux sont produits pour tout utilisateur qui a `base_prompt` et `current_model`, même sans colonne `critical`. Cette comparaison seule ne change pas la sélection.
+- **Cas réussi** : un cas est réussi si son taux de réussite sur ses passages atteint `success_rate` (0,6 par défaut ; avec `runs_per_case: 1`, si sa réponse est juste). Ce paramètre ne sert qu'à la comparaison et aux cas critiques : la note et l'intervalle de Wilson n'en dépendent pas. Un appel en échec d'un côté donne « non vérifié », jamais une régression.
+- **Colonne `critical`** (optionnelle) dans `cases.csv` : `oui`, `true`, `1` ou `yes` pour un cas critique ; `non`, `false`, `0`, `no` ou vide sinon, sans tenir compte des majuscules. Toute autre valeur bloque le lancement. Marquez les cas critiques **avant** le run, pas après avoir vu les résultats. Comme `tag`, la colonne n'est jamais envoyée au modèle et n'entre ni dans la clé de réutilisation ni dans la séparation des cas : l'ajouter ne refait aucun appel de sélection.
+- **Sélection** : une variante qui démontrerait le seuil mais casse plus de `max_regressions_critiques` cas critiques réussis par le prompt actuel est écartée, avec le statut « casse un cas critique », et la suivante la moins chère gagne. Le défaut, 0, est strict : un seul cas critique cassé écarte la variante. Le verdict nomme la variante écartée la moins chère, son coût et ses cas.
+- **Validation** : le prompt actuel est aussi exécuté sur les cas critiques de validation, pour leur comparer le gagnant et ses quasi-égaux. Ces appels figurent dans le devis de confirmation, sur une ligne à part, au prix du modèle de référence, et comptent dans `max_calls`. Sans cas critique en validation, il n'y a aucun appel de plus.
+- **« Confirmé »** veut alors dire : note brute de validation au moins égale au seuil, **et** pas plus de `max_regressions_critiques` cas critiques de validation cassés. Sinon, « non confirmée », sans substitution. Un cas critique de validation qui n'a pas pu être comparé (appel en échec, ou appels du prompt actuel refusés au devis) est nommé dans le verdict, sans retirer la confirmation.
+
+Limites :
+
+- **Peu de cas critiques, résultat indicatif.** Un avertissement s'affiche sous 10 cas critiques de sélection, sous 5 de validation, ou si aucun n'est tombé en validation.
+- **Un cas critique tiré comme exemple few-shot** n'est jamais évalué ; un avertissement le nomme.
+- **Plusieurs passages par cas : du bruit quand la référence est pile au seuil.** Si la référence réussit un cas de justesse (exactement `success_rate`), un passage de plus ou de moins suffit à créer ou à effacer une régression. Le rapport compte ces réussites de justesse.
+- **Seul ce qui est marqué critique est protégé.** Un cas important non marqué compte comme les autres.
 
 ### Configuration, prix, fournisseurs
 
@@ -107,7 +126,7 @@ Le moteur est importable (`saverun.pipeline.prepare` puis `execute_plan`), la li
 - **Testée sur quelques runs réels seulement** : deux tâches de classification (détection d'urgence sur e-mails synthétiques, et intentions bancaires sur le jeu public Banking77, voir ci-dessous) et trois modèles. Ces runs ne disent rien des autres tâches ni des autres fournisseurs, et les situations qu'ils n'ont pas rencontrées ne sont vérifiées qu'avec de faux clients.
 - **Petits échantillons.** Avec peu de cas, les intervalles sont larges et le seuil peut être inatteignable (20 cas au total laissent 13 cas de sélection environ, soit une borne basse maximale d'environ 77 %). La validation sur peu de cas n'est qu'indicative. Visez 50 cas ou plus.
 - **Petits écarts indépartageables.** Sur des écarts de quelques points, 88 cas de sélection ne permettent pas de départager des variantes : 100 % donne un intervalle de 96 à 100 % et 95,5 % un intervalle de 89 à 98 %, qui se chevauchent. Un écart plus net se voit : 90,9 % donne 83 à 95 %, sans chevauchement avec 100 %.
-- **Toutes les erreurs comptent pareil.** Rater une urgence vaut autant que de la sur-détecter. Si l'une des deux erreurs vous coûte plus cher, la note ne le reflète pas.
+- **Toutes les erreurs comptent pareil.** Rater une urgence vaut autant que de la sur-détecter. Si l'une des deux erreurs vous coûte plus cher, la note ne le reflète pas. Les cas critiques permettent d'interdire qu'une variante casse certains cas, mais ne pondèrent pas la note.
 - **Tâches à sortie vérifiable seulement.** La notation est déterministe (`exact`, `json_fields` tout-ou-rien) : pas de juge LLM, donc pas de textes libres, de résumés ni de rédaction.
 - **Coût estimé, pas facture réelle.** Le coût est le nombre de tokens renvoyé par l'API multiplié par les prix de `prices.yaml`. Il ne tient compte ni des remises (cache, lots) ni d'un éventuel changement de tarif, et n'inclut pas le coût de l'exécution de SAVE Run elle-même (appels de test, réessais). Un modèle gratuit est valorisé à un tarif de référence : c'est un coût estimé, pas une économie réelle.
 - **Prix à vérifier.** Les prix fournis sont des exemples fictifs. Vérifiez-les, avec leur date et leur source, avant de vous fier à un chiffre d'économie.
@@ -130,7 +149,7 @@ Réserves :
 - Cinq messages du jeu de test ont été lus par l'assistant de code : trois (intention `card_arrival`), en rédigeant les définitions ; ils ont servi à réécrire une définition et ont été exclus du tirage. Deux autres (même intention), affichés par erreur après la validation des définitions, n'ont pas été exclus.
 - Banking77 est public et **probablement présent dans les données d'entraînement** des modèles testés.
 - Les seuils de 70 % et 65 % ont été **choisis après avoir vu** qu'aucune variante ne démontrait 90 %. Ce ne sont pas des décisions métier.
-- « Confirmé » veut dire que la note brute de validation atteint le seuil. Sur 50 cas, l'intervalle reste large (63 % – 86 %) : la validation ne démontre pas à elle seule le seuil.
+- « Confirmé » veut dire que la note brute de validation atteint le seuil (ce test n'a pas de cas critiques). Sur 50 cas, l'intervalle reste large (63 % – 86 %) : la validation ne démontre pas à elle seule le seuil.
 
 Les notes ci-dessus sont celles obtenues avec la lecture tolérante du marqueur de réponse, ajoutée après le premier run : elle récupère 55 réponses justes mal lues (dont 44 pour une variante à raisonnement de Sonnet) et ne change aucun verdict.
 

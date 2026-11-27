@@ -46,4 +46,7 @@ scoring: exact            # exact | json_fields
 # output_format: 'Réponds avec le JSON brut uniquement, sans texte avant ou après : {"categorie": "..."}'
 # fields: [categorie]     # json_fields seulement ; par défaut, toutes les clés de `expected`
 # monthly_volume: 50000   # optionnel : appels par mois, pour chiffrer l'économie
+# Comparaison avec le prompt actuel et cas critiques (colonne `critical` de cases.csv, voir le README) :
+# success_rate: 0.6            # un cas est « réussi » si ce taux de ses passages est atteint ; la note n'en dépend pas
+# max_regressions_critiques: 0 # cas critiques réussis par le prompt actuel qu'une variante peut casser (0 = strict)
 seed: 0                   # graine de la séparation des cas et des variantes
