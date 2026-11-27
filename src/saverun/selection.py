@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from .comparison import Comparison
 from .config import Config
 from .cost import PriceTable, Savings, cost_per_1000, savings
 from .runner import MAX_FAILED_SHARE, CallResult, untested_models
@@ -47,6 +48,9 @@ class Row:
     wrong_answers: int = 0            # completed answers scored wrong (per answer, not per case)
     wrong_truncated: int = 0          # those that were also truncated
     off_format_share: float | None = None  # completed, not truncated, unreadable answers; None: cannot be judged
+    comparison: Comparison | None = None   # case by case against the current prompt; None: no reference
+    critical_passed: int = 0               # critical cases passed (rate >= success_rate), among critical_n
+    critical_n: int = 0                    # critical cases with at least one completed run
 
     @property
     def unfair(self) -> bool:

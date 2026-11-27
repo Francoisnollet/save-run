@@ -9,6 +9,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
+from .comparison import ComparisonContext, compare_rows
 from .config import Config
 from .cost import PriceTable, call_cost, estimate_tokens
 from .runner import (CallResult, Job, MaxCallsError, Preflight, RunStore, build_jobs, execute, preflight,
@@ -66,6 +67,7 @@ class RunOutcome:
     economy: Economy
     untested: dict[str, str]
     notes: list[str] = field(default_factory=list)
+    comparison: ComparisonContext | None = None   # what the case-by-case comparison rests on
 
     @property
     def variant_by_id(self) -> dict[str, Variant]:
@@ -131,6 +133,7 @@ def execute_plan(plan: Plan, runtimes, store: RunStore, *, progress: Callable[[C
     labels = closed_labels([c.expected for c in every_case], cfg.scoring)
     raw_rows = build_rows(sel_results, {c.id: c.expected for c in split.selection}, plan.all_variants, cfg, plan.prices,
                           labels=labels)
+    raw_rows, comparison = compare_rows(raw_rows, sel_results, split.selection, cfg)  # informative: select ignores it
     selection = select(raw_rows, cfg.seuil_qualite)
     notes: list[str] = []
 
@@ -155,7 +158,7 @@ def execute_plan(plan: Plan, runtimes, store: RunStore, *, progress: Callable[[C
         notes.append("La validation n'a pas pu être exécutée : le gagnant reste « non confirmé ».")
 
     return RunOutcome(plan, sel_results, val_results, selection.rows, selection, validations,
-                      compute_economy(selection, cfg), untested_models(sel_results + val_results), notes)
+                      compute_economy(selection, cfg), untested_models(sel_results + val_results), notes, comparison)
 
 
 def _affordable_pairs(plan: Plan, selection: Selection, store: RunStore, notes: list[str]) -> list[tuple[str, str]]:
