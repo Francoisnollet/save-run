@@ -17,9 +17,10 @@ Règles non négociables du produit :
 ## État du projet
 
 - v0 fonctionnelle : `saverun run`, `saverun diagnose`, `--dry-run` avec faux modèle.
+- Version 0.2.0 : cas critiques et comparaison avec le prompt actuel. La version est écrite dans `pyproject.toml` et `saverun.__version__` ; un test vérifie qu'elles concordent.
 - Testée sur quelques runs réels, sur deux tâches de classification (détection d'urgence sur e-mails synthétiques, et intentions bancaires sur le jeu public Banking77) et trois modèles : deux chez Anthropic, un gratuit chez NVIDIA via `openai_compatible`.
 - Dépôt public depuis le 2026-11-13 : https://github.com/Francoisnollet/save-run, branche `main` seule. README en français (`README.md`) et en anglais (`README.en.md`).
-- Confirmation demandée avant les appels de validation payants, avec un coût maximum par candidat au prix de son modèle. 477 tests.
+- Confirmation demandée avant les appels de validation payants, avec un coût maximum par candidat au prix de son modèle. 479 tests.
 - Cas critiques et comparaison cas par cas avec le prompt actuel : colonne `critical`, `success_rate`, `max_regressions_critiques`, statut « casse un cas critique », section « Par rapport au prompt actuel », `comparison.csv`, contrôle des cas critiques en validation. Aucun run réel n'a encore de colonne `critical`.
 - Vérification Banking77 après ce chantier, depuis une copie du cache dans un dossier temporaire, sans appel ni écriture dans `saverun-out/` (empreintes vérifiées avant et après) : aux trois seuils (0,90, 0,70, 0,65), verdicts, lignes de validation et colonnes déjà présentes de `results.csv` inchangés.
 - Résultat principal : sur ce jeu de test, plusieurs variantes atteignent presque la même note. Le choix repose donc surtout sur le coût, et le rapport le signale.
