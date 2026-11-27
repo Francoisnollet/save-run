@@ -39,6 +39,34 @@ def test_invalid(data):
         parse_config(data)
 
 
+def test_success_rate_and_max_critical_regressions_defaults():
+    c = parse_config(base())
+    assert (c.success_rate, c.max_regressions_critiques) == (0.6, 0)
+    assert load_config("config.example.yaml").success_rate == 0.6
+
+
+@pytest.mark.parametrize("value", [1, 1.0, 0.5, 0.01])
+def test_success_rate_accepted(value):
+    assert parse_config(base(success_rate=value)).success_rate == value
+
+
+@pytest.mark.parametrize("value", [0, 0.0, -0.1, 1.01, 2, True, "0.6", None])
+def test_success_rate_rejected(value):
+    with pytest.raises(ConfigError, match="success_rate"):
+        parse_config(base(success_rate=value))
+
+
+@pytest.mark.parametrize("value", [0, 1, 3])
+def test_max_critical_regressions_accepted(value):
+    assert parse_config(base(max_regressions_critiques=value)).max_regressions_critiques == value
+
+
+@pytest.mark.parametrize("value", [-1, 1.5, True, "0"])
+def test_max_critical_regressions_rejected(value):
+    with pytest.raises(ConfigError, match="max_regressions_critiques"):
+        parse_config(base(max_regressions_critiques=value))
+
+
 def test_runs_warning_only_when_temperature_zero():
     assert parse_config(base(runs_per_case=3)).warnings == []
     zero = base(runs_per_case=3, models=[{**MODEL, "temperature": 0}])

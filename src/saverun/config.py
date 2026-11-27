@@ -36,6 +36,10 @@ class Config:
     n_variants: int = 20
     runs_per_case: int = 1
     seuil_qualite: float = 0.75
+    # A case is "passed" when its success rate over its runs reaches success_rate. Used only to compare a variant
+    # with the current prompt case by case and for critical cases: the score and its Wilson interval never use it.
+    success_rate: float = 0.6
+    max_regressions_critiques: int = 0  # critical cases passed by the current prompt that a variant may fail
     validation_part: float = 0.25
     max_calls: int | None = None
     max_tokens: int = 300  # output ceiling per call
@@ -93,6 +97,14 @@ def _number(data: dict, key: str, default, lo, hi, integer=False, optional=False
     return v
 
 
+def _success_rate(data: dict) -> float:
+    """Above 0 (at 0 every case would pass) and at most 1 (every run must succeed)."""
+    v = data.get("success_rate", 0.6)
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v <= 1:
+        raise ConfigError("success_rate doit être un nombre supérieur à 0 et au plus égal à 1.")
+    return float(v)
+
+
 def parse_config(data: object) -> Config:
     if not isinstance(data, dict):
         raise ConfigError("Le fichier de configuration doit contenir un dictionnaire YAML.")
@@ -127,6 +139,8 @@ def parse_config(data: object) -> Config:
         n_variants=_number(data, "n_variants", 20, 1, 100, integer=True),
         runs_per_case=_number(data, "runs_per_case", 1, 1, 20, integer=True),
         seuil_qualite=_number(data, "seuil_qualite", 0.75, 0.01, 0.99),
+        success_rate=_success_rate(data),
+        max_regressions_critiques=_number(data, "max_regressions_critiques", 0, 0, 10**6, integer=True),
         validation_part=_number(data, "validation_part", 0.25, 0.05, 0.5),
         max_calls=_number(data, "max_calls", None, 1, 10**9, integer=True, optional=True),
         max_tokens=_number(data, "max_tokens", 300, 16, 32000, integer=True),
