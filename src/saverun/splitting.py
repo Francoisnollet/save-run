@@ -121,6 +121,32 @@ def tag_warnings(selection: list[Case]) -> list[str]:
             "n'est qu'indicative."]
 
 
+MIN_CRITICAL_SELECTION = 10   # fewer critical selection cases than this: their success rate is only indicative
+MIN_CRITICAL_VALIDATION = 5   # fewer critical validation cases than this: their check is only indicative
+
+
+def critical_warnings(split: Split) -> list[str]:
+    """Where the critical cases fell. The split never looks at them, so this is where an unlucky draw shows."""
+    every = split.examples + split.selection + split.validation
+    if not any(c.critical for c in every):
+        return []
+    out = []
+    shots = sorted(c.id for c in split.examples if c.critical)
+    if shots:
+        out.append(f"Cas critique(s) tiré(s) comme exemples few-shot, donc jamais évalué(s) : {', '.join(shots)}.")
+    n_sel = sum(c.critical for c in split.selection)
+    if n_sel < MIN_CRITICAL_SELECTION:
+        out.append(f"Seulement {n_sel} cas critique(s) dans la sélection (moins de {MIN_CRITICAL_SELECTION}) : leur "
+                   "taux de réussite n'est qu'indicatif.")
+    n_val = sum(c.critical for c in split.validation)
+    if n_val == 0:
+        out.append("Aucun cas critique n'est tombé dans l'ensemble de validation.")
+    elif n_val < MIN_CRITICAL_VALIDATION:
+        out.append(f"Seulement {n_val} cas critique(s) dans la validation (moins de {MIN_CRITICAL_VALIDATION}) : leur "
+                   "vérification n'est qu'indicative.")
+    return out
+
+
 def _pick_examples(shuffled: list[Case], n: int, label: Callable[[Case], str],
                    rnd: random.Random) -> tuple[list[Case], list[str]]:
     """Few-shot examples with at least one case per distinct expected value, when n allows it.

@@ -95,7 +95,7 @@ def test_real_mode_writes_the_files_to_apply(tmp_path, monkeypatch):
     outcome = execute_plan(plan, runtimes, store)
     paths, notes = write_outputs(outcome, tmp_path / "out")
     names = {p.name for p in paths}
-    assert names == {"results.csv", "report.md", "best_prompt.txt", "best_config.json"} and not notes
+    assert names == {"results.csv", "report.md", "comparison.csv", "best_prompt.txt", "best_config.json"} and not notes
     conf = json.loads((tmp_path / "out" / "best_config.json").read_text(encoding="utf-8"))
     prompt = (tmp_path / "out" / "best_prompt.txt").read_text(encoding="utf-8")
     assert conf["simulation"] is False and conf["prompt"] + "\n" == prompt

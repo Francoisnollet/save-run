@@ -15,6 +15,7 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
+from .comparison import EPS, rates_by_couple
 from .pipeline import RunOutcome
 from .runner import MAX_FAILED_SHARE
 from .scoring import wilson
@@ -25,7 +26,15 @@ FOOTER = "Généré avec SAVE Run (https://allrun.be)"
 
 CSV_FIELDS = ["model", "variant", "levers", "score", "ci_low", "ci_high", "n_cases", "avg_tokens_in",
               "avg_tokens_out", "cost_per_1000", "currency", "estimated_cost", "status", "failed_share",
-              "truncated_share", "off_format_share", "simulation"]
+              "truncated_share", "off_format_share", "simulation",
+              # case by case against the current prompt (empty without a reference) and critical cases
+              "regressions", "critical_regressions", "corrections", "common_failures", "unverified",
+              "critical_passed", "critical_n", "critical_score", "critical_ci_low", "critical_ci_high", "at_threshold"]
+
+COMPARISON_CSV = "comparison.csv"
+COMPARISON_FIELDS = ["model", "variant", "case", "critical", "tag", "reference_rate", "rate", "outcome", "simulation"]
+REGRESSION, CORRECTION, COMMON_FAILURE, PASSED_BOTH, UNVERIFIED = (
+    "régression", "correction", "échec commun", "réussi", "non vérifié")
 
 
 # --- Formatting --------------------------------------------------------------------
@@ -33,6 +42,8 @@ CSV_FIELDS = ["model", "variant", "levers", "score", "ci_low", "ci_high", "n_cas
 SHORT_STATUS = {PLUS_CHERE: "démontré, + chère"}   # terminal only
 TRUNCATED_ERRORS_FROM = 0.02      # from this share of truncated answers, the report says what they explain
 OFF_FORMAT_SHOWN = 5              # couples named in the off-format line, the most affected first
+CASE_IDS_SHOWN = 10               # case ids listed per set in the comparison, critical regressions apart (all listed)
+OTHER_CRITICAL_SHOWN = 8          # other variants breaking a critical case, listed in the report before cutting
 
 
 def pct(x: float, digits: int = 0) -> str:
@@ -192,7 +203,7 @@ def failure_lines(o: RunOutcome) -> list[str]:
 # --- results.csv ---------------------------------------------------------------------
 
 def write_results_csv(path: Path, o: RunOutcome) -> None:
-    cur = o.plan.prices.currency
+    cur, near = o.plan.prices.currency, _near_counts(o)
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=CSV_FIELDS)
         w.writeheader()
@@ -206,7 +217,57 @@ def write_results_csv(path: Path, o: RunOutcome) -> None:
                 "estimated_cost": r.estimated, "status": r.status, "failed_share": round(r.failed_share, 4),
                 "truncated_share": round(r.truncated_share, 4),
                 "off_format_share": "" if r.off_format_share is None else round(r.off_format_share, 4),
-                "simulation": o.plan.dry_run})
+                "simulation": o.plan.dry_run, **_comparison_cells(o, r, near)})
+
+
+def _comparison_cells(o: RunOutcome, r: Row, near: Counter) -> dict:
+    c, cells = r.comparison, {}
+    for name in ("regressions", "critical_regressions", "corrections", "common_failures", "unverified"):
+        cells[name] = "" if c is None else len(getattr(c, name))
+    if r.critical_n:
+        lo, hi = wilson(r.critical_passed, r.critical_n)
+        cells.update(critical_passed=r.critical_passed, critical_n=r.critical_n,
+                     critical_score=round(r.critical_passed / r.critical_n, 4), critical_ci_low=round(lo, 4),
+                     critical_ci_high=round(hi, 4))
+    else:
+        cells.update(critical_passed="", critical_n="", critical_score="", critical_ci_low="", critical_ci_high="")
+    # one run per case: a rate is 0 or 1, "just at success_rate" means nothing
+    cells["at_threshold"] = near[(r.model, r.variant)] if o.plan.config.runs_per_case > 1 and r.n_cases else ""
+    return cells
+
+
+def _near_counts(o: RunOutcome) -> Counter:
+    ctx = o.comparison
+    return Counter((m, v) for m, v, _ in ctx.at_threshold) if ctx else Counter()
+
+
+def write_comparison_csv(path: Path, o: RunOutcome) -> bool:
+    """One line per (model, variant) and per selection case, against the reference. False when there is none."""
+    ctx, cfg = o.comparison, o.plan.config
+    if ctx is None or ctx.reference is None:
+        return False
+    cases = sorted(o.plan.split.selection, key=lambda c: c.id)
+    rates = rates_by_couple(o.selection_results, {c.id: c.expected for c in cases}, cfg, "selection")
+    ref = rates.get(ctx.reference, {})
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=COMPARISON_FIELDS)
+        w.writeheader()
+        for r in o.rows:
+            c = r.comparison
+            if c is None:
+                continue
+            outcome = {**{x: REGRESSION for x in c.regressions}, **{x: CORRECTION for x in c.corrections},
+                       **{x: COMMON_FAILURE for x in c.common_failures}, **{x: UNVERIFIED for x in c.unverified}}
+            own = rates.get((r.model, r.variant), {})
+            for case in cases:
+                w.writerow({"model": r.model, "variant": r.variant, "case": case.id, "critical": case.critical,
+                            "tag": case.tag, "reference_rate": _rate(ref, case.id), "rate": _rate(own, case.id),
+                            "outcome": outcome.get(case.id, PASSED_BOTH), "simulation": o.plan.dry_run})
+    return True
+
+
+def _rate(rates: dict[str, float], case: str):
+    return round(rates[case], 4) if case in rates else ""
 
 
 # --- best_prompt.txt and best_config.json ----------------------------------------------
@@ -278,6 +339,192 @@ def _tag_cell(k: float, n: int) -> str:
     return f"{k:g}/{n} : {pct(k / n)} ({pct(lo)} – {pct(hi)})"
 
 
+# --- Case by case against the current prompt ------------------------------------------------
+
+def success_rule(cfg) -> str:
+    text = (f"Un cas est « réussi » si son taux de réussite sur ses passages atteint {pct(cfg.success_rate)} "
+            "(success_rate). Cette règle ne sert qu'à la comparaison avec le prompt actuel et aux cas critiques : "
+            "la note et l'intervalle de Wilson n'en dépendent pas.")
+    if cfg.runs_per_case == 1:
+        text += " Avec un seul passage par cas, un cas est réussi si sa réponse est juste."
+    return text
+
+
+def _has_critical(o: RunOutcome) -> bool:
+    return any(c.critical for c in o.plan.split.selection)
+
+
+def _ids(ids, limit: int | None = CASE_IDS_SHOWN) -> str:
+    ids = list(ids)
+    if limit is None or len(ids) <= limit:
+        return ", ".join(ids)
+    return ", ".join(ids[:limit]) + f" … et {len(ids) - limit} autres"
+
+
+def _critical_cell(r: Row) -> str:
+    return _tag_cell(r.critical_passed, r.critical_n)
+
+
+def _case_details(r: Row, is_reference: bool, critical: set[str]) -> str | None:
+    """Case ids of one row: critical regressions all listed, the other sets cut after CASE_IDS_SHOWN."""
+    c, parts = r.comparison, []
+    if is_reference:  # against itself: only its own failures mean something
+        critical_failed = [x for x in c.common_failures if x in critical]
+        if critical_failed:
+            parts.append(f"cas critiques ratés ({len(critical_failed)}) : {_ids(critical_failed, None)}")
+        other = [x for x in c.common_failures if x not in critical_failed]
+        if other:
+            parts.append(f"{'autres ' if critical_failed else ''}cas ratés ({len(other)}) : {_ids(other)}")
+    else:
+        if c.critical_regressions:
+            parts.append(f"régressions sur cas critiques ({len(c.critical_regressions)}) : "
+                         f"{_ids(c.critical_regressions, None)}")
+        other = [x for x in c.regressions if x not in c.critical_regressions]
+        if other:
+            parts.append(f"{'autres ' if c.critical_regressions else ''}régressions ({len(other)}) : {_ids(other)}")
+        if c.corrections:
+            parts.append(f"corrections ({len(c.corrections)}) : {_ids(c.corrections)}")
+        if c.common_failures:
+            parts.append(f"échecs communs ({len(c.common_failures)}) : {_ids(c.common_failures)}")
+    if c.critical_unverified:
+        parts.append(f"cas critiques non vérifiés ({len(c.critical_unverified)}) : {_ids(c.critical_unverified, None)}")
+    other = [x for x in c.unverified if x not in c.critical_unverified]
+    if other:
+        parts.append(f"{'autres ' if c.critical_unverified else ''}cas non vérifiés ({len(other)}) : {_ids(other)}")
+    return f"- **{r.variant} sur {r.model}** : " + " ; ".join(parts) + "." if parts else None
+
+
+def comparison_section(o: RunOutcome) -> list[str]:
+    ctx, cfg = o.comparison, o.plan.config
+    ref = ctx.reference if ctx else None
+    has_critical = _has_critical(o)
+    L = ["", "## Par rapport au prompt actuel", ""]
+    if ref is None:
+        L.append(f"Aucune comparaison cas par cas : {ctx.reason if ctx else 'non calculée.'}")
+        if not has_critical:
+            return L
+    else:
+        L.append(f"Référence : {ref[1]} sur {ref[0]}, le prompt actuel (la même référence que pour l'économie). "
+                 f"Cas de sélection uniquement ; le détail par cas est dans {COMPARISON_CSV}.")
+    L += ["", success_rule(cfg), ""]
+    head = ["Variante", "Modèle"]
+    if ref:
+        head += ["Régressions", "dont critiques", "Corrections", "Échecs communs", "Non vérifiés"]
+    if has_critical:
+        head.append("Cas critiques réussis (intervalle 95 %)")
+    L += ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    for r in o.rows:
+        if r.comparison is None and not r.critical_n:
+            continue
+        cells = [r.variant + (" (référence)" if ref and (r.model, r.variant) == ref else ""), r.model]
+        if ref:
+            c = r.comparison
+            cells += (["—"] * 5 if c is None else
+                      [str(len(x)) for x in (c.regressions, c.critical_regressions, c.corrections, c.common_failures,
+                                             c.unverified)])
+        if has_critical:
+            cells.append(_critical_cell(r))
+        L.append("| " + " | ".join(cells) + " |")
+    if ref:
+        details = detail_lines(o, ref, {c.id for c in o.plan.split.selection if c.critical})
+        if details:
+            L += ["", "Identifiants des cas. Pour le gagnant, ses quasi-égaux et la référence : régressions sur cas "
+                  f"critiques en entier, et pour le reste les {CASE_IDS_SHOWN} premiers. Pour les autres variantes qui "
+                  f"cassent un cas critique : ces régressions seulement, {OTHER_CRITICAL_SHOWN} variantes au plus, les "
+                  f"moins chères d'abord. Tout le reste est compté dans le tableau et détaillé dans {COMPARISON_CSV}.",
+                  "", *details]
+    L += at_threshold_lines(o)
+    return L
+
+
+def _key_couples(o: RunOutcome, ref: tuple[str, str] | None) -> set[tuple[str, str]]:
+    """The winner, its near-ties and the reference."""
+    sel = o.selection
+    return ({ref} if ref else set()) | {(r.model, r.variant) for r in [sel.winner, *sel.near_ties] if r is not None}
+
+
+def detail_lines(o: RunOutcome, ref: tuple[str, str], critical: set[str]) -> list[str]:
+    """Key couples in full, then the other variants breaking a critical case (their critical regressions only)."""
+    key = _key_couples(o, ref)
+    compared = [r for r in o.rows if r.comparison is not None]
+    lines = []
+    for r in compared:
+        line = _case_details(r, (r.model, r.variant) == ref, critical) if (r.model, r.variant) in key else None
+        if line:
+            lines.append(line)
+    others = [r for r in compared if (r.model, r.variant) not in key and r.comparison.critical_regressions]
+    for r in others[:OTHER_CRITICAL_SHOWN]:
+        regs = r.comparison.critical_regressions
+        lines.append(f"- **{r.variant} sur {r.model}** : régressions sur cas critiques ({len(regs)}) : "
+                     f"{_ids(regs, None)}.")
+    if len(others) > OTHER_CRITICAL_SHOWN:
+        lines.append(f"- … et {len(others) - OTHER_CRITICAL_SHOWN} autres variantes : voir {COMPARISON_CSV}.")
+    return lines
+
+
+def at_threshold_lines(o: RunOutcome) -> list[str]:
+    """Cases passed just at success_rate: the total, then the winner, its near-ties (with ids) and the reference."""
+    near = _near_counts(o)
+    if not near:
+        return []
+    ctx, sel = o.comparison, o.selection
+    L = ["", f"**Cas réussis de justesse.** Leur taux de réussite vaut exactement {pct(o.plan.config.success_rate)} : "
+         f"un passage juste de moins et ils seraient ratés. Au total : {sum(near.values())} réussite(s) de justesse, "
+         f"réparties sur {len(near)} couple(s) (un même cas compte une fois par couple). Le nombre par couple est "
+         "dans la colonne at_threshold de results.csv.", ""]
+    roles = [(sel.winner, "gagnant")] if sel.winner else []
+    roles += [(t, "quasi-égal") for t in sel.near_ties]
+    for r, role in roles:
+        ids = [case for m, v, case in ctx.at_threshold if (m, v) == (r.model, r.variant)]
+        role += ", la référence elle-même" if (r.model, r.variant) == ctx.reference else ""
+        L.append(f"- {r.variant} sur {r.model} ({role}) : " + (f"{len(ids)} cas : {_ids(ids, None)}." if ids
+                                                              else "aucun cas."))
+    if ctx.reference is not None:
+        n = near[ctx.reference]
+        if ctx.reference not in {(r.model, r.variant) for r, _ in roles}:
+            L.append(f"- {ctx.reference[1]} sur {ctx.reference[0]} (référence) : {n} cas." if n
+                     else f"- {ctx.reference[1]} sur {ctx.reference[0]} (référence) : aucun cas.")
+        if n:  # a paragraph of its own: right after a list item, markdown would fold it into that item
+            L += ["", "Une référence réussie de justesse rend les régressions moins sûres : sur ces cas, un passage de "
+                     "plus ou de moins suffit à créer ou à effacer une régression."]
+    return L
+
+
+def comparison_warnings(o: RunOutcome) -> list[str]:
+    """Report-level warnings on the critical cases. Those that only depend on the split come from the plan."""
+    if not _has_critical(o):
+        return []
+    ctx, cfg = o.comparison, o.plan.config
+    if ctx is None or ctx.reference is None:
+        reason = ctx.reason if ctx else "comparaison non calculée."
+        return [f"Des cas critiques sont marqués, mais aucune comparaison avec le prompt actuel n'est possible "
+                f"({reason.rstrip('.')}) : aucune régression sur un cas critique ne peut être détectée."]
+    ref = next((r for r in o.rows if (r.model, r.variant) == ctx.reference), None)
+    if ref is None or not ref.critical_n or ref.critical_passed / ref.critical_n + EPS >= cfg.seuil_qualite:
+        return []
+    critical = {c.id for c in o.plan.split.selection if c.critical}
+    failed = [x for x in ref.comparison.common_failures if x in critical]
+    return [f"Le prompt actuel ne réussit que {ref.critical_passed}/{ref.critical_n} cas critiques "
+            f"({pct(ref.critical_passed / ref.critical_n)}), sous le seuil de qualité de {pct(cfg.seuil_qualite)} : "
+            "la vérification des cas critiques ne protège que ceux qu'il réussit. Cas critiques qu'il rate : "
+            f"{_ids(failed, None)}."]
+
+
+def winner_comparison_line(o: RunOutcome) -> str | None:
+    """One line for the terminal: the winner against the current prompt."""
+    w = o.selection.winner
+    if w is None or w.comparison is None:
+        return None
+    c = w.comparison
+    if (w.model, w.variant) == o.comparison.reference:
+        return "Par rapport au prompt actuel : le couple retenu est le prompt actuel lui-même."
+    if not c.regressions and not c.corrections:
+        return "Par rapport au prompt actuel : aucune régression."
+    critical = f", dont {len(c.critical_regressions)} sur cas critiques," if _has_critical(o) else ""
+    return (f"Par rapport au prompt actuel : {len(c.regressions)} régression(s){critical} et "
+            f"{len(c.corrections)} correction(s). Détail dans report.md.")
+
+
 def render_report(o: RunOutcome, footer: bool = True) -> str:
     cfg, split = o.plan.config, o.plan.split
     L: list[str] = ["# Rapport SAVE Run", ""]
@@ -294,6 +541,7 @@ def render_report(o: RunOutcome, footer: bool = True) -> str:
           "de Wilson à 95 %. Lignes triées par coût.", ""]
     L += _md_table(o)
     L += _tag_section(o)
+    L += comparison_section(o)
     L += ["", "## Conditions et réserves", ""]
     L += [f"- Cas : {len(split.examples) + len(split.selection) + len(split.validation)} au total "
           f"({len(split.examples)} exemples few-shot, {len(split.selection)} de sélection, "
@@ -306,7 +554,8 @@ def render_report(o: RunOutcome, footer: bool = True) -> str:
     L += [f"- {x}" for x in off_format_lines(o)]
     L += [f"- {x}" for x in failure_lines(o)]
     L += ["", "## Prix", ""] + [f"- {x}" for x in price_notes(o)]
-    caveats = [*o.plan.prices.warnings([m.id for m in cfg.models]), *o.plan.warnings, *o.notes]
+    caveats = [*o.plan.prices.warnings([m.id for m in cfg.models]), *o.plan.warnings, *comparison_warnings(o),
+               *o.notes]
     caveats = list(dict.fromkeys(caveats))
     if caveats:
         L += ["", "## Avertissements", ""] + [f"- {x}" for x in caveats]
@@ -325,6 +574,10 @@ def write_outputs(o: RunOutcome, out_dir: Path, footer: bool = True) -> tuple[li
     written.append(out_dir / "results.csv")
     (out_dir / "report.md").write_text(render_report(o, footer), encoding="utf-8")
     written.append(out_dir / "report.md")
+    if write_comparison_csv(out_dir / COMPARISON_CSV, o):
+        written.append(out_dir / COMPARISON_CSV)
+    elif _has_critical(o):
+        notes.append(f"Aucune comparaison avec le prompt actuel : {COMPARISON_CSV} n'est pas écrit.")
     if o.plan.dry_run:
         notes.append("Simulation : best_prompt.txt et best_config.json ne sont pas écrits.")
     elif o.selection.winner is None:
@@ -389,6 +642,9 @@ def print_summary(o: RunOutcome, console: Console) -> None:
         console.print(f"  ! {line}", highlight=False)
     for line in economy_lines(o):
         console.print(f"  {line}", highlight=False)
+    line = winner_comparison_line(o)
+    if line:
+        console.print(f"  {line}", highlight=False)
     console.print("\n[bold]Validation[/]", highlight=False)
     for line in validation_lines(o):
         console.print(f"  {line}", highlight=False)
@@ -399,6 +655,7 @@ def print_summary(o: RunOutcome, console: Console) -> None:
         flags += truncation_lines(o)
     if any(r.off_format_share for r in o.rows):
         flags += off_format_lines(o)
+    flags += comparison_warnings(o)
     for line in flags:
         console.print(f"  ! {line}", highlight=False)
     if o.plan.dry_run:
