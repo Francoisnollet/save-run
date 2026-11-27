@@ -171,7 +171,7 @@ def test_comparison_changes_neither_scores_nor_statuses():
     assert strip(compared) == strip(plain)
     assert strip(select(compared, 0.7).rows) == strip(select(plain, 0.7).rows)
     assert any(r.comparison.critical_regressions for r in compared)           # V02 breaks critical cases...
-    assert select(compared, 0.6).winner.variant == "V02"                        # ...and still wins: not yet filtered
+    assert select(compared, 0.6).winner.variant == "V02"          # ...and wins: select() alone never filters
 
 
 def fake_outcome(tmp_path, the_cases):

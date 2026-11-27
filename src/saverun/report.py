@@ -19,7 +19,8 @@ from .comparison import EPS, rates_by_couple
 from .pipeline import RunOutcome
 from .runner import MAX_FAILED_SHARE
 from .scoring import wilson
-from .selection import NON_TESTE, PLUS_CHERE, RETENUE, Row, not_separated, tag_scores, winner_confirmed
+from .selection import (CASSE_CRITIQUE, NON_TESTE, PLUS_CHERE, RETENUE, Row, not_separated, tag_scores,
+                        winner_confirmed)
 
 SIMULATION_BANNER = "SIMULATION : faux modèle, résultats sans valeur"
 FOOTER = "Généré avec SAVE Run (https://allrun.be)"
@@ -65,6 +66,10 @@ def verdict(o: RunOutcome) -> str:
     cur = o.plan.prices.currency
     w = sel.winner
     if w is None:
+        if any(r.status == CASSE_CRITIQUE for r in sel.rows):
+            return (f"Aucune variante n'est retenue : celles qui démontrent {pct(cfg.seuil_qualite)} de qualité "
+                    "(borne basse de l'intervalle à 95 %) ratent des cas critiques que le prompt actuel réussissait."
+                    + set_aside_sentence(o))
         return (f"Aucune variante ne démontre {pct(cfg.seuil_qualite)} de qualité (borne basse de l'intervalle "
                 "à 95 %) : baissez le seuil ou ajoutez des cas de test.")
     text = (f"{w.variant} sur {w.model} est la moins chère à démontrer {pct(cfg.seuil_qualite)} de qualité "
@@ -79,7 +84,29 @@ def verdict(o: RunOutcome) -> str:
         text += ". La validation n'a pas pu être exécutée."
     if w.unfair:
         text += (f" Non comparable équitablement ({pct(w.failed_share)} d'appels en échec) : à relancer.")
-    return text
+    return text + set_aside_sentence(o)
+
+
+SET_ASIDE_IDS_SHOWN = 5   # critical case ids named in the verdict; the comparison section lists them all
+
+
+def set_aside_sentence(o: RunOutcome) -> str:
+    """The cheapest variant set aside for critical cases, when it was cheaper than the winner (or there is none)."""
+    w, cur = o.selection.winner, o.plan.prices.currency
+    aside = [r for r in o.selection.rows if r.status == CASSE_CRITIQUE
+             and (w is None or r.cost_per_1000 + 1e-12 < w.cost_per_1000)]
+    if not aside:
+        return ""
+    r = min(aside, key=lambda x: (x.cost_per_1000, x.model, x.variant))
+    regs, cost = r.comparison.critical_regressions, f"{num(r.cost_per_1000)} {cur}"
+    ids = _ids(regs, SET_ASIDE_IDS_SHOWN)
+    if w is None:
+        more = f" ; {len(aside) - 1} autre(s) variante(s) écartée(s) pour la même raison" if len(aside) > 1 else ""
+        return f" La moins chère, {r.variant} sur {r.model} ({cost}), rate {len(regs)} cas critique(s) : {ids}{more}."
+    more = (f" ; {len(aside) - 1} autre(s) variante(s) moins chère(s) écartée(s) pour la même raison"
+            if len(aside) > 1 else "")
+    return (f" {r.variant} sur {r.model} était moins chère ({cost}), mais elle rate {len(regs)} cas critique(s) que "
+            f"le prompt actuel réussissait : {ids}{more}.")
 
 
 def separation_lines(o: RunOutcome) -> list[str]:

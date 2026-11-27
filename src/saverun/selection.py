@@ -24,6 +24,7 @@ QUASI = "quasi à égalité"
 PLUS_CHERE = "seuil démontré, plus chère"
 SOUS_SEUIL = "sous le seuil"
 NON_TESTE = "non testé"
+CASSE_CRITIQUE = "casse un cas critique"
 SANS_REPONSE = "aucun appel abouti"
 
 
@@ -166,13 +167,29 @@ def _order(r: Row) -> tuple:
     return (r.cost_per_1000 is None, r.cost_per_1000 or 0.0, r.model, r.variant)
 
 
+def _demonstrates(r: Row, threshold: float) -> bool:
+    return not r.status and r.n_cases > 0 and r.lo + EPS >= threshold
+
+
+def set_aside_critical(rows: list[Row], threshold: float, max_critical: int) -> list[Row]:
+    """Mark "casse un cas critique" the rows that would compete but fail more critical cases passed by the current
+    prompt than max_critical allows. Run before select(), which then leaves them out: never the winner, never a
+    near-tie. Rows below the threshold keep their own status, and without a comparison nothing can be checked.
+    """
+    out = []
+    for r in rows:
+        breaks = r.comparison is not None and len(r.comparison.critical_regressions) > max_critical
+        out.append(replace(r, status=CASSE_CRITIQUE) if breaks and _demonstrates(r, threshold) else r)
+    return out
+
+
 def select(rows: list[Row], threshold: float) -> Selection:
     """Cheapest row whose lower bound reaches the threshold. Raw score never decides."""
-    eligible = [r for r in rows if not r.status and r.n_cases > 0 and r.lo + EPS >= threshold]
+    eligible = [r for r in rows if _demonstrates(r, threshold)]
     winner = min(eligible, key=lambda r: (r.cost_per_1000, -r.lo, r.model, r.variant), default=None)
     out = []
     for r in sorted(rows, key=_order):
-        if r.status:                        # already "non testé" or "aucun appel abouti"
+        if r.status:                        # already "non testé", "aucun appel abouti" or "casse un cas critique"
             out.append(r)
         elif winner is not None and r is winner:
             out.append(replace(r, status=RETENUE))

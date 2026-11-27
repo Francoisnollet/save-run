@@ -16,7 +16,7 @@ from .runner import (CallResult, Job, MaxCallsError, Preflight, RunStore, build_
                      untested_models)
 from .scoring import closed_labels, expected_label, validate_expected
 from .selection import (Economy, Row, Selection, Validation, build_rows, compute_economy, reachability, select,
-                        validate, validation_pairs)
+                        set_aside_critical, validate, validation_pairs)
 from .splitting import Case, Split, critical_warnings, split_cases, tag_warnings
 from .variants import Variant, base_variant, build_variants
 
@@ -133,6 +133,7 @@ def execute_plan(plan: Plan, runtimes, store: RunStore, *, progress: Callable[[C
     raw_rows = build_rows(sel_results, {c.id: c.expected for c in split.selection}, plan.all_variants, cfg, plan.prices,
                           labels=labels)
     raw_rows, comparison = compare_rows(raw_rows, sel_results, split.selection, cfg)  # informative: select ignores it
+    raw_rows = set_aside_critical(raw_rows, cfg.seuil_qualite, cfg.max_regressions_critiques)
     selection = select(raw_rows, cfg.seuil_qualite)
     notes: list[str] = []
 
