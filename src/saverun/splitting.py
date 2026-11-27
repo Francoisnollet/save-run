@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import csv
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 from pathlib import Path
 
@@ -17,6 +17,11 @@ MIN_CASES_PER_TAG = 10  # fewer selection cases than this under a tag: its score
 
 
 UNTAGGED = "(sans tag)"
+
+# Accepted values of the optional `critical` column, compared after strip() and casefold(). Empty: not critical.
+CRITICAL_TRUE = ("oui", "true", "1", "yes")
+CRITICAL_FALSE = ("non", "false", "0", "no", "")
+CRITICAL_LOOKALIKES = ("critical", "critique")  # header names, after strip() and casefold(), that are flagged
 
 
 class CasesError(ValueError):
@@ -29,6 +34,7 @@ class Case:
     input: str
     expected: str
     tag: str = ""  # optional group, for the "Note par tag" section only: never sent, never used to split or to select
+    critical: bool = False  # optional flag: never sent, never in the reuse key, never used to split
 
 
 @dataclass(frozen=True)
@@ -39,8 +45,21 @@ class Split:
     warnings: list[str] = field(default_factory=list)
 
 
+def _critical(value: str | None, line: int, name: str) -> bool:
+    """The `critical` cell as a boolean. Any value outside the accepted lists stops before the first call."""
+    v = (value or "").strip().casefold()
+    if v in CRITICAL_TRUE:
+        return True
+    if v in CRITICAL_FALSE:
+        return False
+    raise CasesError(f"Ligne {line} de {name} : valeur « {value.strip()} » invalide dans la colonne « critical » "
+                     f"(acceptées : {', '.join(CRITICAL_TRUE)} ; {', '.join(x for x in CRITICAL_FALSE if x)}, "
+                     "ou vide pour un cas non critique).")
+
+
 def load_cases(path: str | Path) -> tuple[list[Case], list[str]]:
-    """Read cases.csv (columns input, expected, optional tag). Exact duplicate inputs are dropped with a warning."""
+    """Read cases.csv (columns input, expected, optional tag and critical). Exact duplicate inputs are dropped with a
+    warning."""
     p = Path(path)
     if not p.is_file():
         raise CasesError(f"Fichier de cas introuvable : {p}")
@@ -48,14 +67,19 @@ def load_cases(path: str | Path) -> tuple[list[Case], list[str]]:
         reader = csv.DictReader(f)
         if not reader.fieldnames or not {"input", "expected"} <= set(reader.fieldnames):
             raise CasesError("cases.csv doit avoir les colonnes « input » et « expected ».")
+        has_critical = "critical" in reader.fieldnames
         rows = list(reader)
-    cases, seen, seen_tags, warnings, dropped = [], {}, {}, [], 0
+    cases, seen, seen_tags, position, warnings, dropped = [], {}, {}, {}, [], 0
+    for name in reader.fieldnames:
+        if name != "critical" and name.strip().casefold() in CRITICAL_LOOKALIKES:
+            warnings.append(f"Colonne « {name} » ignorée, vouliez-vous « critical » ?")
     for i, r in enumerate(rows, start=2):  # line 1 is the header
         inp, exp, tag = (r["input"] or "").strip(), (r["expected"] or "").strip(), (r.get("tag") or "").strip()
         if not inp and not exp:
             continue
         if not inp or not exp:
             raise CasesError(f"Ligne {i} de {p.name} : « input » ou « expected » vide.")
+        critical = _critical(r.get("critical"), i, p.name)
         if inp in seen:
             dropped += 1
             if seen[inp] != exp:
@@ -64,15 +88,23 @@ def load_cases(path: str | Path) -> tuple[list[Case], list[str]]:
             elif seen_tags[inp] != tag:
                 warnings.append(f"Ligne {i} : même input que la ligne précédente avec un autre tag (ignorée) ; "
                                 "vérifiez vos données.")
+            kept = cases[position[inp]]
+            if kept.critical != critical:  # a critical case takes precedence: the kept case becomes critical
+                cases[position[inp]] = replace(kept, critical=True)
+                warnings.append(f"Ligne {i} : même input que la ligne précédente avec une autre valeur « critical » "
+                                "; le cas est critique, car l'une des deux lignes l'est. Vérifiez vos données.")
             continue
-        seen[inp], seen_tags[inp] = exp, tag
-        cases.append(Case(id=f"C{i - 1:03d}", input=inp, expected=exp, tag=tag))
+        seen[inp], seen_tags[inp], position[inp] = exp, tag, len(cases)
+        cases.append(Case(id=f"C{i - 1:03d}", input=inp, expected=exp, tag=tag, critical=critical))
     if dropped:
         warnings.append(f"{dropped} cas en double (même input) ignoré(s) : un cas ne doit jamais "
                         "se retrouver dans deux ensembles.")
     untagged = sum(not c.tag for c in cases)
     if 0 < untagged < len(cases):
         warnings.append(f"{untagged} cas sans tag : ils sont regroupés sous « {UNTAGGED} » dans la note par tag.")
+    if has_critical and not any(c.critical for c in cases):
+        warnings.append("La colonne « critical » est présente, mais aucun cas n'est marqué critique : "
+                        "aucune vérification des cas critiques.")
     return cases, warnings
 
 

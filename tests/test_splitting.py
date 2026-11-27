@@ -159,3 +159,81 @@ def test_warning_when_a_tag_has_too_few_selection_cases():
     warnings = tag_warnings(enough + few + untagged)
     assert len(warnings) == 1 and f"B ({MIN_CASES_PER_TAG - 1})" in warnings[0] and "A (" not in warnings[0]
     assert tag_warnings(enough) == []
+
+
+# --- optional critical column -------------------------------------------------------------------------
+
+import csv
+
+from saverun.splitting import CRITICAL_FALSE, CRITICAL_TRUE
+
+
+def test_without_the_critical_column_no_case_is_critical(tmp_path):
+    cases, warnings = load_cases(write_tagged(tmp_path, ["a,oui,F1", "b,non,F2"]))
+    assert [c.critical for c in cases] == [False, False] and warnings == []
+
+
+@pytest.mark.parametrize("value", [*CRITICAL_TRUE, " OUI ", "True", "Yes"])
+def test_critical_true_values(tmp_path, value):
+    cases, _ = load_cases(write_tagged(tmp_path, [f"a,x,{value}"], header="input,expected,critical"))
+    assert cases[0].critical is True
+
+
+@pytest.mark.parametrize("value", [*CRITICAL_FALSE, " Non ", "FALSE"])
+def test_critical_false_values_and_empty_cell(tmp_path, value):
+    cases, _ = load_cases(write_tagged(tmp_path, ["a,x,oui", f"b,x,{value}"], header="input,expected,critical"))
+    assert [c.critical for c in cases] == [True, False]
+
+
+@pytest.mark.parametrize("value", ["peut-être", "o", "2", "vrai"])
+def test_an_invalid_critical_value_stops_with_its_line(tmp_path, value):
+    path = write_tagged(tmp_path, ["a,x,oui", f"b,x,{value}"], header="input,expected,critical")
+    with pytest.raises(CasesError, match=f"Ligne 3 .*« {value} ».*critical"):
+        load_cases(path)
+
+
+def test_critical_column_with_no_critical_case_is_flagged(tmp_path):
+    _, warnings = load_cases(write_tagged(tmp_path, ["a,x,non", "b,x,"], header="input,expected,critical"))
+    assert len(warnings) == 1 and "aucun cas n'est marqué critique" in warnings[0]
+
+
+@pytest.mark.parametrize("first,second", [("oui", "non"), ("non", "oui")])
+def test_a_duplicate_stays_critical_if_either_line_is(tmp_path, first, second):
+    cases, warnings = load_cases(write_tagged(tmp_path, [f"a,x,F1,{first}", "b,x,F1,non", f"a,x,F1,{second}"],
+                                              header="input,expected,tag,critical"))
+    assert [(c.id, c.critical) for c in cases] == [("C001", True), ("C002", False)]   # first line's id is kept
+    (w,) = [w for w in warnings if "autre valeur « critical »" in w]
+    assert w == ("Ligne 4 : même input que la ligne précédente avec une autre valeur « critical » ; le cas est "
+                 "critique, car l'une des deux lignes l'est. Vérifiez vos données.")
+
+
+def test_same_input_and_same_critical_value_is_a_plain_duplicate(tmp_path):
+    cases, warnings = load_cases(write_tagged(tmp_path, ["a,x,non", "a,x,"], header="input,expected,critical"))
+    assert [c.critical for c in cases] == [False] and not any("autre valeur « critical »" in w for w in warnings)
+
+
+@pytest.mark.parametrize("name", ["Critical", " critical", "CRITIQUE", "critique "])
+def test_a_lookalike_critical_header_is_ignored_with_a_warning(tmp_path, name):
+    path = tmp_path / "cases.csv"
+    with path.open("w", encoding="utf-8", newline="") as f:
+        csv.writer(f).writerows([["input", "expected", name], ["a", "x", "oui"], ["b", "x", "non"]])
+    cases, warnings = load_cases(path)
+    assert [c.critical for c in cases] == [False, False]                              # not accepted silently
+    assert f"Colonne « {name} » ignorée, vouliez-vous « critical » ?" in warnings
+
+
+def test_critical_changes_neither_the_split_nor_the_calls(tmp_path):
+    from saverun.config import load_config
+    from saverun.cost import load_prices
+    from saverun.pipeline import prepare
+    from saverun.runner import RunStore
+
+    plain, _ = load_cases("cases.example.csv")
+    flagged = [Case(c.id, c.input, c.expected, c.tag, critical=i % 3 == 0) for i, c in enumerate(plain)]
+    a, b = split_cases(plain, 0.25, 0), split_cases(flagged, 0.25, 0)
+    for part in ("examples", "selection", "validation"):
+        assert [c.id for c in getattr(a, part)] == [c.id for c in getattr(b, part)]
+    cfg, prices = load_config("config.example.yaml"), load_prices("prices.yaml")
+    pa = prepare(cfg, plain, prices, RunStore(tmp_path / "a"), dry_run=True)
+    pb = prepare(cfg, flagged, prices, RunStore(tmp_path / "b"), dry_run=True)
+    assert [j.key for j in pa.jobs] == [j.key for j in pb.jobs]
