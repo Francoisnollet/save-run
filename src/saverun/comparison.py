@@ -90,6 +90,32 @@ def at_threshold(rates: dict[tuple[str, str], dict[str, float]], success_rate: f
                   if abs(rate - success_rate) < EPS)
 
 
+def check_critical_validation(validations: list, results, cases, config, reference: tuple[str, str] | None) -> list:
+    """Validations (selection.Validation) checked against the reference on the critical validation cases.
+
+    A candidate that breaks more than max_regressions_critiques of them is no longer confirmed. A case without a
+    completed run on one side (failed calls, or the reference not run) is unverified, never a regression. The
+    candidate is never replaced: this only turns a confirmation off. The reference itself is not checked.
+    """
+    critical = [c for c in cases if c.critical]
+    if not critical:
+        return validations
+    validations = [replace(v, critical_n=len(critical)) for v in validations]
+    if reference is None:
+        return validations
+    rates = rates_by_couple(results, {c.id: c.expected for c in critical}, config, "validation")
+    out = []
+    for v in validations:
+        if (v.model, v.variant) == reference:
+            out.append(v)
+            continue
+        c = compare(rates.get(reference, {}), rates.get((v.model, v.variant), {}), critical, config.success_rate)
+        breaks = len(c.critical_regressions) > config.max_regressions_critiques
+        out.append(replace(v, confirmed=v.confirmed and not breaks, critical_checked=True,
+                           critical_regressions=c.critical_regressions, critical_unverified=c.critical_unverified))
+    return out
+
+
 def compare_rows(rows: list, results, cases, config, phase: str = "selection") -> tuple[list, ComparisonContext]:
     """Rows (selection.Row) with their comparison and critical counts attached. Scores and statuses are not touched.
 

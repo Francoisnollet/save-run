@@ -76,12 +76,25 @@ def verdict(o: RunOutcome) -> str:
             f"(note {pct(w.score)}, borne basse {pct(w.lo)}), pour {num(w.cost_per_1000)} {cur} les 1 000 appels"
             f"{' (coût estimé)' if w.estimated else ''}")
     confirmed = winner_confirmed(o.validations)
-    if confirmed is True:
+    val = next((v for v in o.validations if v.is_winner), None)
+    unverified = val.critical_unverified if val is not None else ()
+    if confirmed is True and unverified:
+        text += (f", confirmée sur la note de validation, mais {len(unverified)} cas critique(s) de validation n'ont "
+                 f"pas été comparés au prompt actuel : {_ids(unverified, SET_ASIDE_IDS_SHOWN)}.")
+    elif confirmed is True:
         text += ", confirmée sur les cas de validation."
+    elif confirmed is False and breaks_critical(val, cfg):
+        low = "" if _score_reached(val, cfg) else " sa note est sous le seuil, et"
+        text += (f", mais NON CONFIRMÉE sur les cas de validation :{low} elle rate "
+                 f"{len(val.critical_regressions)} cas critique(s) que le prompt actuel réussissait : "
+                 f"{_ids(val.critical_regressions, SET_ASIDE_IDS_SHOWN)}. Examinez-les avant de l'appliquer.")
     elif confirmed is False:
         text += ", mais NON CONFIRMÉE sur les cas de validation : ajoutez des cas avant de l'appliquer."
     else:
         text += ". La validation n'a pas pu être exécutée."
+    if unverified and confirmed is not True:
+        text += (f" {len(unverified)} cas critique(s) de validation non vérifié(s) (appel en échec, "
+                 f"ou prompt actuel non exécuté) : {_ids(unverified, SET_ASIDE_IDS_SHOWN)}.")
     if w.unfair:
         text += (f" Non comparable équitablement ({pct(w.failed_share)} d'appels en échec) : à relancer.")
     return text + set_aside_sentence(o)
@@ -145,6 +158,44 @@ def economy_lines(o: RunOutcome) -> list[str]:
     return lines
 
 
+def breaks_critical(v, cfg) -> bool:
+    """The validated candidate fails more critical validation cases than tolerated, against the current prompt."""
+    return v is not None and v.critical_checked and len(v.critical_regressions) > cfg.max_regressions_critiques
+
+
+def _score_reached(v, cfg) -> bool:
+    return v.n_cases > 0 and v.score + EPS >= cfg.seuil_qualite
+
+
+def _critical_note(v) -> str:
+    """What the critical check found for one validated candidate, appended to its line; empty if not checked."""
+    if not v.critical_checked:
+        return ""
+    regs, unv = v.critical_regressions, v.critical_unverified
+    parts = [f"{len(regs)} régression(s) sur cas critiques : {_ids(regs, None)}" if regs
+             else "aucune régression sur cas critiques"]
+    if unv:
+        parts.append(f"{len(unv)} non vérifié(s) : {_ids(unv, None)}")
+    return f" ({' ; '.join(parts)})"
+
+
+def critical_validation_lines(o: RunOutcome) -> list[str]:
+    """How the critical validation cases were checked. Nothing when there is none."""
+    cfg = o.plan.config
+    n = max((v.critical_n for v in o.validations), default=0)
+    if not n:
+        return []
+    ctx = o.comparison
+    if ctx is None or ctx.reference is None:
+        return [f"Les {n} cas critiques de validation ne sont comparés à rien : pas de prompt actuel mesuré."]
+    if not any(v.critical_checked for v in o.validations):
+        return ["Le gagnant est le prompt actuel : ses cas critiques de validation ne sont comparés à rien."]
+    model, variant = ctx.reference
+    return [f"Cas critiques de validation : {n}, comparés à {variant} sur {model} (le prompt actuel). Un candidat "
+            f"qui en rate plus de {cfg.max_regressions_critiques} que le prompt actuel réussissait n'est pas "
+            "confirmé (max_regressions_critiques)."]
+
+
 def validation_lines(o: RunOutcome) -> list[str]:
     cfg, vals = o.plan.config, o.validations
     if not vals:
@@ -155,14 +206,20 @@ def validation_lines(o: RunOutcome) -> list[str]:
     for v in vals:
         tag = "gagnant" if v.is_winner else "quasi-égal"
         lines.append(f"{v.variant} sur {v.model} ({tag}) : {pct(v.score)} sur {v.n_cases} cas "
-                     f"(intervalle {pct(v.lo)} – {pct(v.hi)}) → {'confirmé' if v.confirmed else 'non confirmé'}")
+                     f"(intervalle {pct(v.lo)} – {pct(v.hi)}) → {'confirmé' if v.confirmed else 'non confirmé'}"
+                     + _critical_note(v))
+    lines += critical_validation_lines(o)
     w = next(v for v in vals if v.is_winner)
     if w.indicative:
         lines.append(f"Indicatif : l'ensemble de validation ne compte que {w.n_planned} cas (moins de 20).")
-    if not w.confirmed:
+    if not w.confirmed and not _score_reached(w, cfg):
         lines.append(f"Non confirmée : la note sur la validation est sous {pct(cfg.seuil_qualite)}. Aucun autre "
                      "candidat n'est substitué (ce serait re-sélectionner sur la validation) ; ajoutez des cas "
                      "(visez 50) et relancez.")
+    if breaks_critical(w, cfg):
+        lines.append(f"Non confirmée : elle rate {len(w.critical_regressions)} cas critique(s) de validation que "
+                     "le prompt actuel réussissait. Aucun autre candidat n'est substitué (ce serait re-sélectionner "
+                     "sur la validation) ; examinez ces cas avant de l'appliquer.")
     if len(vals) > 1:
         lines.append("Les quasi-égaux sont validés à titre d'information : la recommandation ne change pas.")
     return lines
@@ -321,7 +378,10 @@ def best_config(o: RunOutcome) -> dict:
                       "currency": o.plan.prices.currency, "estimated_cost": w.estimated},
         "validation": None if val is None else {"confirmed": val.confirmed, "score": round(val.score, 4),
                                                 "ci_low": round(val.lo, 4), "ci_high": round(val.hi, 4),
-                                                "n_cases": val.n_cases, "indicative": val.indicative},
+                                                "n_cases": val.n_cases, "indicative": val.indicative,
+                                                **({"critical_regressions": list(val.critical_regressions),
+                                                    "critical_unverified": list(val.critical_unverified)}
+                                                   if val.critical_checked else {})},
         "to_rerun": w.unfair,  # too many failed calls: not fairly comparable
         "prices": {"date": o.plan.prices.models[model.id].date, "source": o.plan.prices.models[model.id].source},
     }

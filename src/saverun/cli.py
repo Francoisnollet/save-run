@@ -90,6 +90,10 @@ def _print_plan(plan: Plan, console: Console) -> None:
                   "(le gagnant et ses quasi-égaux).", highlight=False)
     console.print(f"Coût maximum estimé : {num(pf.max_cost)} {cur} pour la sélection, plus au plus "
                   f"{num(plan.validation_cost_ceiling)} {cur} par candidat validé.", highlight=False)
+    if plan.reference_check_calls:
+        console.print(f"Cas critiques de validation : au plus {plan.reference_check_calls} appels du prompt actuel "
+                      f"sur {cfg.current_model}, coût maximum estimé {num(plan.reference_check_cost)} {cur}, pour "
+                      "vérifier que le gagnant ne casse aucun de ces cas.", highlight=False)
     console.print(plan.reachability[0], highlight=False)
     for w in plan.warnings:
         console.print(f"! {w}", highlight=False)
@@ -130,7 +134,9 @@ def cmd_run(args: argparse.Namespace, console: Console) -> int:
         todo = [q for q in quotes if q.new_calls]
         console.print("\nValidation sur les cas mis de côté (le gagnant reste celui de la sélection) :", highlight=False)
         for q in todo:
-            console.print(f"  {q.variant} sur {q.model} ({'gagnant' if q.is_winner else 'quasi-égal'}) : "
+            role = ("prompt actuel, sur les cas critiques de validation seulement" if q.is_reference
+                    else "gagnant" if q.is_winner else "quasi-égal")
+            console.print(f"  {q.variant} sur {q.model} ({role}) : "
                           f"{q.new_calls} appels, coût maximum estimé {num(q.max_cost)} {cur}"
                           f"{' (tarif de référence)' if q.estimated else ''}", highlight=False)
         for q in quotes:

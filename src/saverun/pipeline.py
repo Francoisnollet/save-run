@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable
 
-from .comparison import ComparisonContext, compare_rows
+from .comparison import ComparisonContext, check_critical_validation, compare_rows, reference_pair
 from .config import Config
 from .cost import PriceTable, call_cost, estimate_tokens
 from .runner import (CallResult, Job, MaxCallsError, Preflight, RunStore, build_jobs, execute, preflight,
@@ -35,6 +35,8 @@ class Plan:
     reachability: tuple[str, bool]
     warnings: list[str]
     dry_run: bool
+    reference_check_calls: int = 0     # at most: the current prompt on the critical validation cases
+    reference_check_cost: float = 0.0  # their maximum cost, at the current model's price
 
     @property
     def all_variants(self) -> list[Variant]:
@@ -50,6 +52,7 @@ class ValidationQuote:
     new_calls: int
     max_cost: float                   # upper estimate, in the price file's currency
     estimated: bool                   # free model priced at its reference tariff
+    is_reference: bool = False        # the current prompt, run on the critical validation cases only
 
 
 VALIDATION_DECLINED = ("Validation refusée avant les appels payants : {n} appel(s) non faits, les candidats "
@@ -87,10 +90,15 @@ def prepare(config: Config, cases: list[Case], prices: PriceTable, store: RunSto
     pf = preflight(jobs, prices, None, store)
 
     val_calls = len(split.validation) * config.runs_per_case
-    if config.max_calls is not None and pf.new_calls + val_calls > config.max_calls:
+    ref_jobs = _reference_jobs(config, all_variants, split.validation)
+    ref_calls = len(ref_jobs)
+    if config.max_calls is not None and pf.new_calls + val_calls + ref_calls > config.max_calls:
+        also = f" + {ref_calls} appels du prompt actuel sur les cas critiques de validation" if ref_calls else ""
         raise MaxCallsError(f"{pf.new_calls} appels de sélection + {val_calls} appels de validation "
-                            f"(pour un seul candidat) dépassent max_calls ({config.max_calls}). "
+                            f"(pour un seul candidat){also} dépassent max_calls ({config.max_calls}). "
                             "Réduisez n_variants, le nombre de modèles ou de cas, ou relevez max_calls.")
+    ref_cost = sum(call_cost(estimate_tokens(j.system + j.input), config.max_tokens, prices.models[j.model])
+                   for j in ref_jobs)
     ceiling = max(
         sum(call_cost(estimate_tokens(v.system + c.input), config.max_tokens, prices.models[m.id])
             for c in split.validation) * config.runs_per_case
@@ -101,20 +109,54 @@ def prepare(config: Config, cases: list[Case], prices: PriceTable, store: RunSto
                 reachability=reachability(len(split.selection), config.seuil_qualite),
                 warnings=[*(case_warnings or []), *split.warnings, *tag_warnings(split.selection),
                           *critical_warnings(split), *config.warnings, *variant_warnings, *pf.warnings],
-                dry_run=dry_run)
+                dry_run=dry_run, reference_check_calls=ref_calls, reference_check_cost=ref_cost)
+
+
+def _reference_jobs(config: Config, variants, validation_cases) -> list[Job]:
+    """The current prompt on its model, on the critical validation cases. Empty without a reference or such cases."""
+    ref, _ = reference_pair(config)
+    critical = [c for c in validation_cases if c.critical]
+    if (ref is None or not critical or ref[0] not in {m.id for m in config.models}
+            or ref[1] not in {v.id for v in variants}):
+        return []
+    return build_jobs(variants, config, critical, "validation", [ref])
+
+
+def reference_check_jobs(plan: Plan, pairs: list[tuple[str, str]], reference: tuple[str, str] | None) -> list[Job]:
+    """The calls the validated candidates are compared with on the critical cases: the reference on those cases.
+
+    Empty when there is nothing to compare: no measured reference, no critical validation case, or the reference
+    is the only candidate.
+    """
+    if reference is None or not any(p != reference for p in pairs):
+        return []
+    return [j for j in _reference_jobs(plan.config, plan.all_variants, plan.split.validation)
+            if (j.model, j.variant) == reference]
 
 
 def validation_quotes(plan: Plan, pairs: list[tuple[str, str]], store: RunStore,
-                      winner: tuple[str, str] | None = None) -> list[ValidationQuote]:
-    """For each candidate, the validation calls not yet in the store and their maximum cost at its model's price."""
+                      winner: tuple[str, str] | None = None,
+                      reference_jobs: list[Job] | None = None) -> list[ValidationQuote]:
+    """For each candidate, the validation calls not yet in the store and their maximum cost at its model's price.
+
+    The reference check gets a quote of its own, unless the reference is itself a candidate (its calls are then
+    already in its quote).
+    """
     cfg, done = plan.config, store.load_ok()
     quotes = []
-    for model, variant in pairs:
+
+    def quote(model, variant, jobs, **flags):
         price = plan.prices.models[model]
-        pending = [j for j in build_jobs(plan.all_variants, cfg, plan.split.validation, "validation",
-                                         [(model, variant)]) if j.key not in done]
+        pending = [j for j in jobs if j.key not in done]
         cost = sum(call_cost(estimate_tokens(j.system + j.input), cfg.max_tokens, price) for j in pending)
-        quotes.append(ValidationQuote(model, variant, (model, variant) == winner, len(pending), cost, price.free))
+        return ValidationQuote(model, variant, new_calls=len(pending), max_cost=cost, estimated=price.free, **flags)
+
+    for model, variant in pairs:
+        jobs = build_jobs(plan.all_variants, cfg, plan.split.validation, "validation", [(model, variant)])
+        quotes.append(quote(model, variant, jobs, is_winner=(model, variant) == winner))
+    if reference_jobs and (reference_jobs[0].model, reference_jobs[0].variant) not in pairs:
+        quotes.append(quote(reference_jobs[0].model, reference_jobs[0].variant, reference_jobs, is_winner=False,
+                            is_reference=True))
     return quotes
 
 
@@ -137,23 +179,29 @@ def execute_plan(plan: Plan, runtimes, store: RunStore, *, progress: Callable[[C
     selection = select(raw_rows, cfg.seuil_qualite)
     notes: list[str] = []
 
-    pairs = _affordable_pairs(plan, selection, store, notes)
+    reference = comparison.reference
+    pairs, ref_jobs = _affordable_pairs(plan, selection, store, notes, reference)
     declined = False
     if pairs and confirm_validation is not None:
         winner = (selection.winner.model, selection.winner.variant)
-        quotes = validation_quotes(plan, pairs, store, winner)
+        quotes = validation_quotes(plan, pairs, store, winner, ref_jobs)
         if any(q.new_calls for q in quotes) and not confirm_validation(quotes):
             declined = True
-            pairs = [(q.model, q.variant) for q in quotes if q.new_calls == 0]
+            pairs = [(q.model, q.variant) for q in quotes if q.new_calls == 0 and not q.is_reference]
+            done = store.load_ok()     # declined: only what is cached; the rest stays unverified
+            ref_jobs = [j for j in ref_jobs if j.key in done]
             notes.append(VALIDATION_DECLINED.format(n=sum(q.new_calls for q in quotes)))
     val_results: list[CallResult] = []
     if pairs:
         jobs = build_jobs(plan.all_variants, cfg, split.validation, "validation", pairs)
+        jobs = list({j.key: j for j in [*jobs, *ref_jobs]}.values())   # the reference may also be a near-tie
         val_results = execute(jobs, runtimes, store, progress=progress, sleep=sleep)
     validations = validate(val_results, {c.id: c.expected for c in split.validation}, selection, cfg)
     if declined:  # report only what was actually validated; without the winner, nothing is
         kept = [v for v in validations if (v.model, v.variant) in pairs]
         validations = kept if any(v.is_winner for v in kept) else []
+    # Can only turn a confirmation off, never pick another candidate.
+    validations = check_critical_validation(validations, val_results, split.validation, cfg, reference)
     if selection.winner and not validations and not declined:
         notes.append("La validation n'a pas pu être exécutée : le gagnant reste « non confirmé ».")
 
@@ -161,23 +209,39 @@ def execute_plan(plan: Plan, runtimes, store: RunStore, *, progress: Callable[[C
                       compute_economy(selection, cfg), untested_models(sel_results + val_results), notes, comparison)
 
 
-def _affordable_pairs(plan: Plan, selection: Selection, store: RunStore, notes: list[str]) -> list[tuple[str, str]]:
-    """The candidates to validate, trimmed from the last near-tie so that max_calls is respected."""
+def _affordable_pairs(plan: Plan, selection: Selection, store: RunStore, notes: list[str],
+                      reference: tuple[str, str] | None = None) -> tuple[list[tuple[str, str]], list[Job]]:
+    """The candidates to validate and the reference check, within max_calls.
+
+    Order: the winner, then the reference on the critical validation cases, then the near-ties, trimmed from the
+    last one. A call shared by two of them (the reference is also a near-tie) is counted once.
+    """
     pairs = validation_pairs(selection)
+    ref_jobs = reference_check_jobs(plan, pairs, reference)
     cap = plan.config.max_calls
     if cap is None or not pairs:
-        return pairs
+        return pairs, ref_jobs
     budget = cap - plan.preflight.new_calls
-    done = store.load_ok()
+    seen = set(store.load_ok())
+    steps = [(pairs[0], None), (None, ref_jobs), *((p, None) for p in pairs[1:])]
     kept: list[tuple[str, str]] = []
-    for pair in pairs:
-        jobs = build_jobs(plan.all_variants, plan.config, plan.split.validation, "validation", [pair])
-        pending = sum(j.key not in done for j in jobs)
-        if pending > budget:
+    kept_ref: list[Job] = []
+    for pair, jobs in steps:
+        if pair is not None:
+            jobs = build_jobs(plan.all_variants, plan.config, plan.split.validation, "validation", [pair])
+        new = {j.key for j in jobs} - seen
+        if len(new) > budget:
             break
-        budget -= pending
-        kept.append(pair)
+        budget -= len(new)
+        seen |= new
+        if pair is None:
+            kept_ref = jobs
+        else:
+            kept.append(pair)
     if len(kept) < len(pairs):
         notes.append(f"max_calls : {len(pairs) - len(kept)} quasi-égal(aux) non validé(s) "
                      "(le gagnant passe toujours en premier).")
-    return kept
+    if kept and ref_jobs and not kept_ref:
+        notes.append("max_calls : le prompt actuel n'est pas exécuté sur les cas critiques de validation ; "
+                     "ces cas restent non vérifiés.")
+    return kept, kept_ref

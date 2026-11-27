@@ -76,9 +76,13 @@ class Validation:
     score: float
     lo: float                    # always shown; not used to decide
     hi: float
-    confirmed: bool              # raw score on the validation set reaches the threshold
+    confirmed: bool              # raw score reaches the threshold (and, once checked, no critical case broken)
     indicative: bool             # validation set smaller than INDICATIVE_BELOW
     is_winner: bool
+    critical_n: int = 0                           # critical cases in the validation set
+    critical_checked: bool = False                # compared with the current prompt on those cases
+    critical_regressions: tuple[str, ...] = ()    # critical validation cases passed by the reference, failed here
+    critical_unverified: tuple[str, ...] = ()     # critical validation cases without a completed run on one side
 
 
 # --- Reachability ------------------------------------------------------------------
